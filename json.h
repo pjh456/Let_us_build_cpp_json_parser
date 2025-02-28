@@ -1,5 +1,5 @@
-#ifndef _INCLUDE_JSON_H_
-#define _INCLUDE_JSON_H_
+#ifndef INCLUDE_JSON_H
+#define INCLUDE_JSON_H
 
 #include <vector>
 #include <string>
@@ -50,10 +50,10 @@ namespace Json
 	// Example1: null
 	// Example2: true
 	// Example3: 1
-	// Example4: 0.721
-	// Example5: "shirayuki noa"
-	// Example6: ["0d00", 0.721, true]
-	// Example7: {"mitsukasa ayase":"pad", "meguru":"ciallo"}
+	// Example4: 3.14
+	// Example5: "Example String"
+	// Example6: [value1, value2, value3, ...]
+	// Example7: {"key1": value1, "key2": value2, ...}
 	class Element
 	{
 	public:
@@ -77,16 +77,16 @@ namespace Json
 		virtual std::string serialize() const noexcept { return ""; }
 
 		// Comparison
-		virtual bool operator==(Element& other) const noexcept { return false; }
-		virtual bool operator!=(Element& other) const noexcept { return true; }
+		virtual bool operator==(const Element& other) const noexcept { return false; }
+		virtual bool operator!=(const Element& other) const noexcept { return true; }
 	};
 
 	// json value, which is others' children node.
 	// Example1: null
 	// Example2: true
 	// Example3: 1
-	// Example4: 0.721
-	// Example5: "arihara nanami"
+	// Example4: 3.14
+	// Example5: "Example String"
 	class Value : public Element
 	{
 	private:
@@ -146,16 +146,16 @@ namespace Json
 		// Comparison
 		bool operator==(Value& other) const noexcept { return value == other.value; }
 		bool operator!=(Value& other) const noexcept { return value != other.value; }
-		bool operator==(Element& other) const noexcept override
+		bool operator==(const Element& other) const noexcept override
 		{
 			if (auto* other_cast = dynamic_cast<const Value*>(&other)) { return this == other_cast; }
 			else return false;
 		}
-		bool operator!=(Element& other) const noexcept override { return !((*this) == other); }
+		bool operator!=(const Element& other) const noexcept override { return !((*this) == other); }
 	};
 
 	// json array, which contains a series of elements.
-	// Example: ["murasame", 500, "years old", true]
+	// Example: [value1, value2, value3, ...]
 	class Array : public Element
 	{
 	private:
@@ -245,7 +245,8 @@ namespace Json
 			for (const auto& it : m_arr)
 			{
 				_str += it->serialize();
-				if (is_first) is_first = false, _str.push_back(',');
+				if (is_first) is_first = false;
+				else _str.push_back(',');
 			}
 			_str.push_back(']');
 			return _str;
@@ -254,16 +255,16 @@ namespace Json
 		// Comparing all the elements, which might spends tons of time. Use it carefully!
 		bool operator==(const Array& other) const noexcept { return this->m_arr == other.m_arr; }
 		bool operator!=(const Array& other) const noexcept { return this->m_arr != other.m_arr; }
-		bool operator==(Element& other) const noexcept override 
+		bool operator==(const Element& other) const noexcept override 
 		{
 			if (auto* other_cast = dynamic_cast<const Array*>(&other)) return (*this) == (*other_cast);
 			else return false;
 		}
-		bool operator!=(Element& other) const noexcept override { return !((*this) == other); }
+		bool operator!=(const Element& other) const noexcept override { return !((*this) == other); }
 	};
 
 	// Json object, which contains many pairs of key and value.
-	// example: {"akitsuki kanna":"shinigami", "ero level of nijyouinn hatsuki": 100}
+	// example: {"key1": value1, "key2": value2, ...}
 	class Object :public Element
 	{
 	private:
@@ -362,7 +363,8 @@ namespace Json
 				_str.push_back('\"');
 				_str.push_back(':');
 				_str += v->serialize();
-				if (is_first) is_first = false, _str.push_back(',');
+				if (is_first) is_first = false;
+				else _str.push_back(',');
 			}
 			_str.push_back('}');
 			return _str;
@@ -380,12 +382,12 @@ namespace Json
 			return true;
 		}
 		bool operator!=(Object& other) const noexcept { return !((*this) == other); }
-		bool operator==(Element& other) const noexcept override
+		bool operator==(const Element& other) const noexcept override
 		{
-			if (auto other_cast = dynamic_cast<Object*>(&other)) return (*this) == (*other_cast);
+			if (auto other_cast = dynamic_cast<const Object*>(&other)) return (*this) == (*other_cast);
 			else return false;
 		}
-		bool operator!=(Element& other) const noexcept override { return !((*this) == other); }
+		bool operator!=(const Element& other) const noexcept override { return !((*this) == other); }
 	};
 
 	constexpr void Array::append(const int& val) { append_ptr(new Value(val)); }
@@ -714,43 +716,6 @@ namespace Json
 
 			return arr;
 		}
-
-		/*static void skipValue(Tokenizer* tokenizer)
-		{
-			size_t depth = 1;
-
-			switch (tokenizer->next().type)
-			{
-				case TokenType::ObjectBegin:
-					while (depth > 0)
-					{
-						switch (tokenizer->next().type)
-						{
-							case TokenType::ObjectBegin:
-								++depth;
-								break;
-							case TokenType::ObjectEnd:
-								--depth;
-								break;
-						}
-					}
-					break;
-				case TokenType::ArrayBegin:
-					while (depth > 0)
-					{
-						switch (tokenizer->next().type)
-						{
-						case TokenType::ArrayBegin:
-							++depth;
-							break;
-						case TokenType::ArrayEnd:
-							--depth;
-							break;
-						}
-					}
-					break;
-			}
-		}*/
 	};
 
 	class Utils
