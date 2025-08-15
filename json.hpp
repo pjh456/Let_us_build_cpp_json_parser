@@ -44,6 +44,7 @@ namespace pjh_std
         class InvalidKeyException;
         class SerializationException;
 
+        // Base Json Exception
         class Exception : public std::runtime_error
         {
         public:
@@ -117,7 +118,7 @@ namespace pjh_std
 
             virtual void clear() {}
             virtual Element *copy() const = 0;
-            virtual std::string serialize() const noexcept { return ""; }
+            virtual string_t serialize() const noexcept { return ""; }
 
             virtual bool operator==(const Element &other) const noexcept { return false; }
             virtual bool operator!=(const Element &other) const noexcept { return true; }
@@ -133,7 +134,7 @@ namespace pjh_std
             Value(bool p_value) : m_value(p_value) {}
             Value(int p_value) : m_value(p_value) {}
             Value(float p_value) : m_value(p_value) {}
-            Value(const std::string &p_value) : m_value(p_value) {}
+            Value(const string_t &p_value) : m_value(p_value) {}
             Value(char *p_value) : Value((string_t)p_value) {}
 
             Value(const Value &other) : m_value(other.m_value) {}
@@ -240,10 +241,10 @@ namespace pjh_std
                     throw TypeException("Not float type!");
             }
 
-            std::string as_str() const
+            string_t as_str() const
             {
                 if (is_str())
-                    return as_T<std::string>();
+                    return as_T<string_t>();
                 else
                     throw TypeException("Not string type!");
             }
@@ -251,7 +252,7 @@ namespace pjh_std
         public:
             Element *copy() const noexcept override { return new Value(this); }
 
-            std::string serialize() const noexcept override
+            string_t serialize() const noexcept override
             {
                 if (is_int())
                     return std::to_string(as_int());
@@ -332,9 +333,9 @@ namespace pjh_std
 
             Element *copy() const noexcept override { return new Array(this); }
 
-            std::string serialize() const noexcept override
+            string_t serialize() const noexcept override
             {
-                std::string new_str;
+                string_t new_str;
                 new_str.push_back('[');
                 bool is_first = true;
                 for (const auto &it : m_arr)
@@ -591,7 +592,7 @@ namespace pjh_std
         public:
             Ref(Element *p_ptr = nullptr) : m_ptr(p_ptr) {}
 
-            Ref operator[](const std::string &p_key)
+            Ref operator[](const string_t &p_key)
             {
                 if (!m_ptr)
                     throw NullPointerException("Null reference");
@@ -756,7 +757,7 @@ namespace pjh_std
             const Token forward() const noexcept { return next_token; }
 
             // Get the token (current_token = next_token, next_token updates, return current_token)
-            inline const Token next()
+            Token next()
             {
                 skip_white_space();
                 if (stream.eof())
@@ -905,7 +906,6 @@ namespace pjh_std
         class Parser
         {
         public:
-            // Functions
             static Ref parse(Tokenizer *tokenizer) { return Ref(Parser::parse_value(tokenizer)); }
 
         private:
