@@ -10,9 +10,9 @@
 
 ### 本文包含的技术实践：
 - 面向对象编程：如何通过抽象基类和继承来设计一套灵活的数据结构。
-- 手动内存管理：深入理解 new 和 delete 的责任与时机（这是C++开发者的重要一课）。
+- 手动内存管理：深入理解 `new` 和 `delete` 的责任与时机（这是C++开发者的重要一课）。
 - 自定义错误处理：如何设计一套清晰、具体的异常类来提升代码的健壮性。
-- 词法与语法分析：实现一个简单的 Tokenizer 和递归下降解析器，揭开“解析”的神秘面纱。
+- 词法与语法分析：实现一个简单的 `Tokenizer` 和递归下降解析器，揭开“解析”的神秘面纱。
 - 易用性API设计：如何封装底层实现，提供优雅、易用的链式调用接口。
 
 ### 该文章不包含的技术内容：
@@ -126,7 +126,7 @@ public:
 
 1. **`virtual ~Element()`**：<br>
 这是多态基类的“黄金法则”。<br>
-当我们通过基类指针 Element* 删除一个派生类对象时，如果析构函数不是虚函数，就只会调用基类的析构函数，导致派生类的资源（如 Array 里的元素）无法被释放，造成内存泄漏。将其设为虚函数，可以确保正确的析构函数链被调用。
+当我们通过基类指针 `Element*` 删除一个派生类对象时，如果析构函数不是虚函数，就只会调用基类的析构函数，导致派生类的资源（如 Array 里的元素）无法被释放，造成内存泄漏。将其设为虚函数，可以确保正确的析构函数链被调用。
 
 2. **`is_...()` 成员函数**：<br>
 我们为什么要把这三个函数直接实现在基类里，并且都返回 false？<br>
@@ -134,7 +134,7 @@ public:
 只有当一个子类，比如 `Array`，想要表明自己的身份时，它才需要去 `override is_array()` 函数并返回 `true`。这避免了在每个子类中都要实现全部三个 `is_...` 函数的麻烦。
 
 3. **`as_...()` 成员函数**：<br>
-这里的逻辑与 is_...() 类似，但更加严格。<br>
+这里的逻辑与 `is_...()` 类似，但更加严格。<br>
 它建立的默认规则是：“任何试图将一个基类指针转换为具体类型的操作，默认都是非法的”。<br>
 因此，基类版本直接抛出异常。只有 `Array` 类才有资格 `override as_array()` 并安全地返回 `this` 指针。<br>
 这种“fail-fast”（快速失败）的设计，让类型转换的错误能被立即捕获，而不是产生一个悬空的 `nullptr`，把问题留到后面。
@@ -339,7 +339,7 @@ C++ 的一个核心原则是：谁 `new` 了，谁就得 `delete`。<br>
 **然而，本项目选择手动管理，是出于教学目的**。对于初学者来说，亲手处理 `new` 和 `delete`，能让你对 C++ 的内存模型、对象所有权(ownership)、以及 RAII 的重要性有更深刻、更本质的理解。<br>
 当你完全掌握了这里的逻辑后，用 `std::unique_ptr` 来重构它，将会是一次非常有价值的进阶练习。
 
-3. **`copy()` 的深度拷贝**：现在我们可以实现 Array 和 Object 的 copy 函数了。简单的指针拷贝是“浅拷贝”，会导致两个容器指向同一份内存，当一个析构时，另一个就变成了野指针。我们必须实现“深拷贝”：
+3. **`copy()` 的深度拷贝**：现在我们可以实现 `Array` 和 `Object` 的 `copy` 函数了。简单的指针拷贝是“浅拷贝”，会导致两个容器指向同一份内存，当一个析构时，另一个就变成了野指针。我们必须实现“深拷贝”：
 
 ```cpp
 // 在 Array 类中
@@ -845,7 +845,192 @@ std::string name = root["data"]["users"][0]["name"].as_str();
 这正是实现 `root["data"]["users"]` 这种链式调用的关键。<br>
 每一次 `[]` 操作，都会返回一个包装了下一层元素的 `Ref` 对象，使得下一次 `[]` 操作可以继续进行。
 
-## 六、总结与展望
+## 六、优雅地构建 - 工厂函数的妙用
+
+我们已经拥有了一个功能强大的 JSON 库，但还剩下一个痛点没有解决：**创建 JSON 对象的过程依然很笨拙**。
+
+看看我们现在是怎么做的：
+
+```cpp
+// “之前”的痛苦方式
+auto obj = Object();
+obj.insert("name", "John");
+obj.insert("age", 30);
+
+auto arr = new Array();
+arr->append("C++");
+arr->append("Python");
+obj->insert_raw_ptr("courses", arr); // 手动管理 arr 指针
+
+Ref root(&obj);
+// ... 使用 root ...
+/* 在 obj 被释放之后，
+ arr 变为了已经释放内存的指针，不可使用！*/
+```
+
+这个过程充满了 `new`、`insert`、`append` 的调用，不仅繁琐，而且要求用户需要关心任何父子关系之间的释放顺序和调用顺序，极易出错。
+
+我们的目标是让构建过程像书写 JSON 字面量一样自然。我们希望的代码是这样的：
+
+```cpp
+// 我们想要的“之后”的优雅方式
+Ref root = make_object({
+    {"name", make_value("John")},
+    {"age", make_value(30)},
+    {"courses", make_array({
+        make_value("C++"),
+        make_value("Python")
+    })},
+    {"address", make_value(nullptr)}
+});
+// ... 使用 root ...
+delete root.get();
+// 由于对外只暴露了一个 root，因此不存在除 root 以外的指针被调用的风险，只需要把 root 释放掉即可放心。
+```
+
+这种声明式的语法清晰地反映了数据的结构，可读性极高。
+
+为了实现它，我们将引入一系列 **工厂函数 (Factory Functions)**。
+
+### 7.1 核心思想：隐藏 `new` 关键字
+
+工厂函数的核心思想非常简单：<br>
+将 `new` 关键字和对象的具体构造过程封装到一个独立的函数里。<br>
+用户不再需要关心如何创建对象，只需要调用这个函数，就能得到一个随时可用的成品。
+
+对于我们的库，用户真正关心的类型是 `Ref`，而不是底层的 `Object*`、`Array*` 或 `Value*`。<br>
+因此，我们的工厂函数将接收 C++ 的字面量（如 `123`, `"hello"`），并返回一个封装好的 `Ref` 对象。
+
+### 7.2 第一块积木：`make_value`
+我们先为最基础的 Value 类型创建工厂函数。这是一组重载函数，每一种都对应一种 C++ 的基础类型。
+
+```cpp
+// json_ref.hpp (新添加的工厂函数)
+Ref make_value(std::nullptr_t) { return Ref(new Value(nullptr)); }
+Ref make_value(bool p_val) { return Ref(new Value(p_val)); }
+Ref make_value(int p_val) { return Ref(new Value(p_val)); }
+Ref make_value(float p_val) { return Ref(new Value(p_val)); }
+Ref make_value(const string_t& p_val) { return Ref(new Value(p_val)); }
+Ref make_value(char* p_val) { return Ref(new Value((string_t)p_val)); }
+```
+
+#### 设计细节剖析：
+1. **封装**：<br>
+`new Value(...)` 这个动作被完美地隐藏在了函数内部。<br>
+用户现在只需要和 `make_value` 打交道，代码变得更干净。
+
+2. **统一接口**：<br>
+无论你想创建哪种类型的 `Value`，函数名都是 `make_value`。<br>
+C++ 的函数重载机制会根据你传入的参数类型，自动选择正确的版本。
+
+### 7.3 构建容器：`make_array` 和 `make_object`
+现在，我们利用 `std::initializer_list` 来为容器类型创建工厂。
+
+**对于 `Array`**：<br>
+我们需要一个函数，它能接收一个由 `Ref` 对象组成的初始化列表 `{...}`。
+
+```cpp
+// json_ref.hpp
+Ref make_array(std::initializer_list<Ref> p_list)
+{
+    auto arr = new Array();
+    for (const auto& v : p_list) {
+        // 从 Ref 中获取原始指针，并添加到新 Array 中
+        arr->append_raw_ptr(v.get());
+    }
+    return Ref(arr);
+}
+```
+
+**对于 `Object`**：<br>
+逻辑类似，但初始化列表的元素变成了键值对 `{"key", value}`，在 C++ 中对应 `std::pair`。
+
+```cpp
+// json_ref.hpp
+Ref make_object(std::initializer_list<std::pair<string_t, Ref>> p_list)
+{
+    auto obj = new Object();
+    for (auto& kv : p_list) {
+        // 从 key-value pair 中获取 key 和 Ref 里的原始指针
+        obj->insert_raw_ptr(kv.first, kv.second.get());
+    }
+    return Ref(obj);
+}
+```
+
+#### 设计细节剖析：
+
+1. **`std::initializer_list` 的魔力**：<br>
+这个 C++ 特性是让 `{...}` 语法工作的关键。<br>
+它允许我们向函数传递一个临时的、匿名的元素列表。
+
+2. **组合的力量**：<br>
+这套工厂函数可以完美地嵌套组合。<br>
+`make_object` 的值可以是另一个 `make_array` 的结果，而 `make_array` 的元素又可以是 `make_value` 的结果。<br>
+这种组合能力，让我们能够以声明式的方式构建出任意复杂的 JSON 树。
+
+### 7.4 一个重大的设计权衡：内存管理
+
+我们的新 API 非常优雅，但它引入了一个必须高度警惕的问题。
+
+让我们再看一下 `make_object` 的实现：<br>
+`auto obj = new Object();`<br>
+这个函数在堆上创建了一个对象，然后返回一个**只包含裸指针 (`Element*`)** 的 `Ref`。
+
+**`Ref` 类本身并不知道它需要管理这个指针的生命周期！**
+
+这意味着什么？当你这样写代码时：
+
+```cpp
+void create_and_leak_json() {
+    Ref root = make_object({ {"key", make_value("value")} });
+    /* 当函数结束，root 对象被销毁。
+       但是，它内部的那个 Element* 指针所指向的内存，
+       从未被 delete！这里发生了内存泄漏！*/
+}
+```
+
+**这是一个非常严肃的问题。** 这个设计选择将内存管理的责任完全交还给了**最终用户**。
+
+正确的使用姿势是：
+
+```cpp
+// 1. 创建 JSON 树
+Ref root = make_object({
+    {"name", make_value("John")},
+    {"age", make_value(30)}
+});
+
+// 2. 使用 JSON 对象
+std::cout << root["name"].as_str() << std::endl;
+
+// 3. **手动释放整个树的内存！**
+delete root.get();
+```
+
+你只需要 `delete` 根节点的指针。<br>
+因为我们之前设计的 `Object` 和 `Array` 的析构函数是虚函数，<br>
+并且会递归地 `delete` 它们所拥有的所有子元素，<br>
+所以 `delete root.get()` 会安全地清理掉整个 JSON 树所占用的所有内存。
+
+**总结这个权衡**：
+
+- **优点**：<br>我们获得了一个极其简洁、富有表现力的构建 API。<br>
+`Ref` 类保持了其作为轻量级“引用”或“视图”的简单性。<br>
+同时还避免了误用已释放指针、忘记释放子节点内存这两种常见的内存管理问题。
+
+- **代价**：<br>
+牺牲了自动内存管理 (RAII)。<br>
+库的使用者必须时刻记住，他们通过工厂函数创建的任何 JSON 对象树，都必须在用完后手动 `delete`。
+
+对于一个追求极致安全的现代 C++ 库来说，这可能不是最终的完美方案<br>
+（一个更健壮的方案是让 `Ref` 变成一个类似 `std::unique_ptr` 的智能指针包装器）。
+
+但作为一个设计决策，它清晰地展示了在 **“易用性”** 和 **“安全性”** 之间存在的微妙平衡。
+
+通过理解这一点，你对软件设计的理解又深入了一层。
+
+## 七、总结与展望
 
 恭喜你！我们从零开始，完整地经历了一个 JSON 解析器的诞生全过程：
 
@@ -854,6 +1039,7 @@ std::string name = root["data"]["users"][0]["name"].as_str();
 3. **词法分析**：实现了 `Tokenizer`，将原始字符串流分解为结构化的 `Token`。
 4. **语法分析**：利用递归下降的思想，实现了 `Parser`，将 `Token` 流组装成 `Element` 对象树。
 5. **API 封装**：设计了 `Ref` 类，提供了一个安全、优雅、易用的用户接口。
+6. **决策设计**：用更安全的、只需要管理根节点内存的工厂方法取代了原来手动构建的方式，体验了易用性和安全性设计之间的取舍问题。
 
 这个项目虽小，但它涵盖了从底层设计到上层封装的方方面面。它不仅仅是一个工具，更是一次宝贵的项目实践。
 
@@ -866,3 +1052,5 @@ std::string name = root["data"]["users"][0]["name"].as_str();
 - 功能扩展：增加一个“格式化输出”或“Pretty Print”功能，让 `serialize()` 的输出更具可读性。
 
 希望这次从零到一的旅程，能点燃你对项目开发的激情，并为你未来的编程之路打下坚实的基础。去创造吧！
+
+源码已经放在了 [github 仓库](https://github.com/pjh456/Let_us_build_cpp_json_parser) 中，如果这篇博客对你有帮助，可以给仓库点个 star 支持一下！

@@ -16,6 +16,7 @@ namespace pjh_std
 
         public:
             Value() : m_value(nullptr) {}
+            Value(std::nullptr_t) : m_value(nullptr) {}
             Value(bool p_value) : m_value(p_value) {}
             Value(int p_value) : m_value(p_value) {}
             Value(float p_value) : m_value(p_value) {}

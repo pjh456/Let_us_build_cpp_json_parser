@@ -121,10 +121,50 @@ void test_parser()
     delete root.get(); // 释放内存
 }
 
+void test_factory_build()
+{
+    Ref json = make_object(
+        {
+            {"name", make_value("Alice")},
+            {"age", make_value(25)},
+            {"isStudent", make_value(false)},
+            {
+                "scores",
+                make_array(
+                    {
+                        make_value(90),
+                        make_value(85),
+                        make_value(88),
+                    }),
+            },
+            {
+                "profile",
+                make_object({
+                    {"height", make_value(1.68f)},
+                    {"city", make_value("New York")},
+                }),
+            },
+        });
+
+    // 开始测试
+    assert(json["name"].as_str() == "Alice");
+    assert(json["age"].as_int() == 25);
+    assert(json["isStudent"].as_bool() == false);
+
+    assert(json["scores"].size() == 3);
+    assert(json["scores"][0].as_int() == 90);
+    assert(json["scores"][1].as_int() == 85);
+    assert(json["scores"][2].as_int() == 88);
+
+    assert(json["profile"]["height"].as_float() == 1.68f);
+    assert(json["profile"]["city"].as_str() == "New York");
+}
+
 int main()
 {
     Func(test_value);
     Func(test_array);
     Func(test_object);
     Func(test_parser);
+    Func(test_factory_build);
 }

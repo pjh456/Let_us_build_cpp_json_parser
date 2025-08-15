@@ -1,6 +1,8 @@
 #ifndef INCLUDE JSON_REF
 #define INCLUDE JSON_REF
 
+#include <initializer_list>
+
 #include "json_definition.hpp"
 #include "json_exception.hpp"
 #include "json_element.hpp"
@@ -113,8 +115,31 @@ namespace pjh_std
                 throw TypeException("Not an string value");
             }
 
-            Element *get() { return m_ptr; }
+            Element *get() const { return m_ptr; }
         };
+
+        Ref make_object(std::initializer_list<std::pair<string_t, Ref>> p_list)
+        {
+            auto obj = new Object();
+            for (auto &kv : p_list)
+                obj->insert_raw_ptr(kv.first, kv.second.get());
+            return Ref(obj);
+        }
+
+        Ref make_array(std::initializer_list<Ref> p_list)
+        {
+            auto arr = new Array();
+            for (const auto &v : p_list)
+                arr->append_raw_ptr(v.get());
+            return Ref(arr);
+        }
+
+        Ref make_value(std::nullptr_t) { return Ref(new Value(nullptr)); }
+        Ref make_value(bool p_val) { return Ref(new Value(p_val)); }
+        Ref make_value(int p_val) { return Ref(new Value(p_val)); }
+        Ref make_value(float p_val) { return Ref(new Value(p_val)); }
+        Ref make_value(const string_t p_val) { return Ref(new Value(p_val)); }
+        Ref make_value(char *p_val) { return Ref(new Value((string_t)p_val)); }
     }
 }
 
