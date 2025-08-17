@@ -1,1 +1,7 @@
 test_json.exe
+40mb.json
+test.json
+output.etl
+output.etl.EmbeddedPdbs
+output.etl.NGENPDB
+.vscode

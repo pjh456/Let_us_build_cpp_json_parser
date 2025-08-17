@@ -7,6 +7,7 @@
 #include "json_exception.hpp"
 #include "json_element.hpp"
 #include "json_value.hpp"
+#include "object_pool.hpp"
 
 namespace pjh_std
 {
@@ -16,6 +17,7 @@ namespace pjh_std
         {
         private:
             object_t<Element *> m_obj;
+            static ObjectPool<Object> pool;
 
         public:
             Object() { m_obj.clear(); };
@@ -44,23 +46,49 @@ namespace pjh_std
 
             string_t serialize() const noexcept override
             {
-                string_t new_str;
-                new_str.push_back('{');
+                std::ostringstream oss;
+                oss << '{';
                 bool is_first = true;
                 for (const auto &[k, v] : m_obj)
                 {
-                    new_str.push_back('\"');
-                    new_str += k;
-                    new_str.push_back('\"');
-                    new_str.push_back(':');
-                    new_str += v->serialize();
+                    oss << '\"' << k << '\"' << ':' << v->serialize();
                     if (is_first)
                         is_first = false;
                     else
-                        new_str.push_back(',');
+                        oss << ',';
                 }
-                new_str.push_back('}');
-                return new_str;
+                oss << '}';
+                return oss.str();
+            }
+
+            string_t pretty_serialize(size_t depth = 0, char table_ch = '\t') const noexcept override
+            {
+                std::ostringstream oss;
+                oss << '{' << '\n';
+                bool is_first = true;
+                for (const auto &[k, v] : m_obj)
+                {
+                    if (is_first)
+                        is_first = false;
+                    else
+                        oss << ',' << '\n';
+                    for (size_t idx = 0; idx <= depth; ++idx)
+                        oss << table_ch;
+                    oss << '\"' << k << '\"' << ':';
+                    if (!(v->is_value()))
+                    {
+                        oss << '\n';
+                        for (size_t idx = 0; idx <= depth; ++idx)
+                            oss << table_ch;
+                    }
+                    oss << v->pretty_serialize(depth + 1, table_ch);
+                }
+
+                oss << '\n';
+                for (size_t idx = 0; idx < depth; ++idx)
+                    oss << table_ch;
+                oss << '}';
+                return oss.str();
             }
 
         public:
@@ -149,7 +177,13 @@ namespace pjh_std
             void insert(const string_t &p_key, float p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
             void insert(const string_t &p_key, const string_t &p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
             void insert(const string_t &p_key, char *p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
+
+            void *operator new(size_t n) { Object::pool.allocate(n); }
+
+            void operator delete(void *ptr) { Object::pool.deallocate(ptr); }
         };
+
+        ObjectPool<Object> Object::pool;
     }
 }
 

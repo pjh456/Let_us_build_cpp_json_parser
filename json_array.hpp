@@ -7,6 +7,7 @@
 #include "json_exception.hpp"
 #include "json_element.hpp"
 #include "json_value.hpp"
+#include "object_pool.hpp"
 
 namespace pjh_std
 {
@@ -16,6 +17,7 @@ namespace pjh_std
         {
         private:
             array_t<Element *> m_arr;
+            static ObjectPool<Array> pool;
 
         public:
             Array() : m_arr() {}
@@ -76,21 +78,44 @@ namespace pjh_std
 
             Element *copy() const noexcept override { return new Array(this); }
 
-            std::string serialize() const noexcept override
+            string_t serialize() const noexcept override
             {
-                std::string new_str;
-                new_str.push_back('[');
+                std::ostringstream oss;
+                oss << '[';
                 bool is_first = true;
                 for (const auto &it : m_arr)
                 {
                     if (is_first)
                         is_first = false;
                     else
-                        new_str.push_back(',');
-                    new_str += it->serialize();
+                        oss << ',';
+                    oss << it->serialize();
                 }
-                new_str.push_back(']');
-                return new_str;
+                oss << ']';
+                return oss.str();
+            }
+
+            string_t pretty_serialize(size_t depth = 0, char table_ch = 't') const noexcept override
+            {
+                std::ostringstream oss;
+                oss << '[' << '\n';
+                bool is_first = true;
+                for (const auto &it : m_arr)
+                {
+                    if (is_first)
+                        is_first = false;
+                    else
+                        oss << ',' << '\n';
+
+                    for (size_t idx = 0; idx <= depth; ++idx)
+                        oss << table_ch;
+                    oss << it->pretty_serialize(depth + 1, table_ch);
+                }
+                oss << '\n';
+                for (size_t idx = 0; idx < depth; ++idx)
+                    oss << table_ch;
+                oss << ']';
+                return oss.str();
             }
 
         public:
@@ -187,7 +212,13 @@ namespace pjh_std
                 for (const Element *child : children)
                     remove(child);
             }
+
+            void *operator new(size_t n) { Array::pool.allocate(n); }
+
+            void operator delete(void *ptr) { Array::pool.deallocate(ptr); }
         };
+
+        ObjectPool<Array> Array::pool;
     }
 }
 

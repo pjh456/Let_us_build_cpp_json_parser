@@ -23,7 +23,8 @@ namespace pjh_std
 
             virtual void clear() {}
             virtual Element *copy() const = 0;
-            virtual std::string serialize() const noexcept { return ""; }
+            virtual string_t serialize() const noexcept { return ""; }
+            virtual string_t pretty_serialize(size_t = 0, char = '\t') const noexcept { return ""; }
 
             virtual bool operator==(const Element &other) const noexcept { return false; }
             virtual bool operator!=(const Element &other) const noexcept { return true; }

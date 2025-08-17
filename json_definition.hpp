@@ -5,6 +5,7 @@
 #include <vector>
 #include <map>
 #include <variant>
+#include <sstream>
 
 namespace pjh_std
 {

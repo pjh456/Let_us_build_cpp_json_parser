@@ -2,8 +2,11 @@
 #include <functional>
 #include <chrono>
 #include <cassert>
+#include <filesystem>
+#include <fstream>
 
 #include "json.hpp"
+// #include "json_parser.hpp"
 
 using namespace pjh_std::json;
 
@@ -103,7 +106,8 @@ void test_parser()
 
     InputStream stream(json_text);
     Tokenizer tokenizer(stream);
-    Ref root = Parser::parse(&tokenizer);
+    Parser parser(&tokenizer);
+    Ref root = parser.parse();
 
     assert(root["name"].as_str() == "Bob");
     assert(root["age"].as_int() == 25);
@@ -158,6 +162,26 @@ void test_factory_build()
 
     assert(json["profile"]["height"].as_float() == 1.68f);
     assert(json["profile"]["city"].as_str() == "New York");
+
+    std::cout << json;
+}
+
+void test_file_io()
+{
+    const std::filesystem::path path("E:/Projects/blogs/let_us_build_cpp_json_parser/40mb.json");
+    std::ifstream ifs(path);
+    std::ostringstream oss;
+    oss << ifs.rdbuf(); // 一次性读入
+
+    std::string content = oss.str();
+
+    InputStream stream(content);
+    Tokenizer tokenizer(stream);
+    Parser parser(&tokenizer);
+    Ref root = parser.parse();
+
+    // std::cout << root;
+    delete root.get();
 }
 
 int main()
@@ -167,4 +191,5 @@ int main()
     Func(test_object);
     Func(test_parser);
     Func(test_factory_build);
+    Func(test_file_io);
 }

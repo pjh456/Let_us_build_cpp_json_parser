@@ -66,6 +66,13 @@ namespace pjh_std
             explicit NullPointerException(const std::string &msg)
                 : Exception("Null pointer error: " + msg) {}
         };
+
+        class ThreadException : public Exception
+        {
+        public:
+            explicit ThreadException(const std::string &msg)
+                : Exception("Thread error: " + msg) {}
+        };
     }
 }
 

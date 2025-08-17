@@ -4,6 +4,7 @@
 #include "json_definition.hpp"
 #include "json_exception.hpp"
 #include "json_element.hpp"
+#include "object_pool.hpp"
 
 namespace pjh_std
 {
@@ -13,6 +14,7 @@ namespace pjh_std
         {
         private:
             value_t m_value;
+            static ObjectPool<Value> pool;
 
         public:
             Value() : m_value(nullptr) {}
@@ -138,7 +140,7 @@ namespace pjh_std
         public:
             Element *copy() const noexcept override { return new Value(this); }
 
-            std::string serialize() const noexcept override
+            string_t serialize() const noexcept override
             {
                 if (is_int())
                     return std::to_string(as_int());
@@ -153,7 +155,18 @@ namespace pjh_std
                 else
                     return "";
             }
+
+            string_t pretty_serialize(size_t depth = 0, char = '\t') const noexcept override
+            {
+                return serialize();
+            }
+
+            void *operator new(size_t n) { Value::pool.allocate(n); }
+
+            void operator delete(void *ptr) { Value::pool.deallocate(ptr); }
         };
+
+        ObjectPool<Value> Value::pool;
     }
 }
 

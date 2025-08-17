@@ -2,6 +2,7 @@
 #define INCLUDE JSON_REF
 
 #include <initializer_list>
+#include <ostream>
 
 #include "json_definition.hpp"
 #include "json_exception.hpp"
@@ -116,6 +117,13 @@ namespace pjh_std
             }
 
             Element *get() const { return m_ptr; }
+
+        public:
+            friend std::ostream &operator<<(std::ostream &os, Ref &ref)
+            {
+                os << ref.get()->pretty_serialize();
+                return os;
+            }
         };
 
         Ref make_object(std::initializer_list<std::pair<string_t, Ref>> p_list)

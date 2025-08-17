@@ -3,10 +3,20 @@
 
 #include <string>
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <variant>
 #include <stdexcept>
 #include <algorithm>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <sstream>
+#include <cstdint>
+#include <utility>
+#include <thread>
+#include <atomic>
+#include <optional>
+#include <chrono>
 
 namespace pjh_std
 {
@@ -33,7 +43,7 @@ namespace pjh_std
         using array_t = std::vector<T>;
 
         template <typename T>
-        using object_t = std::map<string_t, T>;
+        using object_t = std::unordered_map<string_t, T>;
 
         // Exceptions
         class Exception;
@@ -103,6 +113,232 @@ namespace pjh_std
                 : Exception("Null pointer error: " + msg) {}
         };
 
+        class ThreadException : public Exception
+        {
+        public:
+            explicit ThreadException(const std::string &msg)
+                : Exception("Thread error: " + msg) {}
+        };
+
+        template <typename T>
+        class MallocAllocator
+        {
+        public:
+            T *allocate(size_t n)
+            {
+                void *raw = ::malloc(n);
+                if (!raw)
+                    throw std::bad_alloc();
+                return reinterpret_cast<T *>(raw);
+            }
+
+            void deallocate(T *ptr)
+            {
+                ::free(ptr);
+            }
+        };
+
+        template <typename T>
+        class FreeListAllocator
+        {
+            struct Node
+            {
+                Node *next;
+            };
+            Node *freeList = nullptr;
+
+        public:
+            ~FreeListAllocator()
+            {
+                while (freeList)
+                {
+                    Node *tmp = freeList;
+                    freeList = freeList->next;
+                    ::free(tmp);
+                }
+            }
+
+            T *allocate(size_t n)
+            {
+                if (freeList)
+                {
+                    Node *node = freeList;
+                    freeList = node->next;
+                    return reinterpret_cast<T *>(node);
+                }
+                void *raw = ::malloc(n);
+                if (!raw)
+                    throw std::bad_alloc();
+                return reinterpret_cast<T *>(raw);
+            }
+
+            void deallocate(T *ptr)
+            {
+                Node *node = reinterpret_cast<Node *>(ptr);
+                node->next = freeList;
+                freeList = node;
+            }
+        };
+
+        template <typename T, size_t BlockSize = 1024>
+        class BlockAllocator
+        {
+            std::vector<void *> blocks;
+            T *currentBlock = nullptr;
+            size_t remaining = 0;
+
+        public:
+            T *allocate(size_t n)
+            {
+                if (remaining == 0)
+                {
+                    // 分配新块
+                    void *block = ::malloc(sizeof(T) * BlockSize);
+                    if (!block)
+                        throw std::bad_alloc();
+                    blocks.push_back(block);
+                    currentBlock = reinterpret_cast<T *>(block);
+                    remaining = BlockSize;
+                }
+                T *obj = currentBlock++;
+                --remaining;
+                return obj;
+            }
+
+            void deallocate(T *ptr)
+            {
+                // 对 BlockAllocator 通常不立即回收单个对象，等析构时释放
+            }
+
+            ~BlockAllocator()
+            {
+                for (void *block : blocks)
+                    ::free(block);
+            }
+        };
+
+        template <typename T, typename Alloc = BlockAllocator<T>>
+        class ObjectPool
+        {
+        private:
+            Alloc m_allocator;
+
+        public:
+            ObjectPool() = default;
+            ~ObjectPool() = default;
+
+        public:
+            T *allocate(size_t n) { return m_allocator.allocate(n); }
+
+            void deallocate(void *ptr) { m_allocator.deallocate(static_cast<T *>(ptr)); }
+        };
+        template <typename T>
+        class Channel
+        {
+        private:
+            size_t m_capacity;
+            std::queue<T> m_queue;
+            std::mutex m_mutex;
+            std::condition_variable m_cond_not_empty;
+            std::condition_variable m_cond_not_full;
+
+        public:
+            Channel(size_t p_capacity = 0) : m_capacity(p_capacity) {}
+
+            ~Channel() = default;
+
+        public:
+            void push(const T &p_item)
+            {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                m_cond_not_full.wait(
+                    lock, [&]()
+                    { return m_capacity == 0 || m_queue.size() < m_capacity; });
+                m_queue.push(p_item);
+                lock.unlock();
+                m_cond_not_empty.notify_one();
+            }
+
+            void push(T &&p_item)
+            {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                m_cond_not_full.wait(
+                    lock, [&]()
+                    { return m_capacity == 0 || m_queue.size() < m_capacity; });
+                m_queue.push(std::move(p_item));
+                lock.unlock();
+                m_cond_not_empty.notify_one();
+            }
+
+            void pop()
+            {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                m_cond_not_empty.wait(
+                    lock, [&]()
+                    { return !m_queue.empty(); });
+                m_queue.pop();
+                lock.unlock();
+                m_cond_not_full.notify_one();
+            }
+
+            T peek()
+            {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                m_cond_not_empty.wait(
+                    lock, [&]()
+                    { return !m_queue.empty(); });
+                T item = std::move(m_queue.front());
+                lock.unlock();
+                return item;
+            }
+        };
+
+        template <typename T>
+        class LockFreeRingBuffer
+        {
+        private:
+            size_t m_capacity;
+            std::vector<T> m_buffer;
+            std::atomic<size_t> m_head{0};
+            std::atomic<size_t> m_tail{0};
+
+        public:
+            LockFreeRingBuffer(size_t p_capacity = 256)
+                : m_capacity(p_capacity), m_buffer(p_capacity) {}
+            ~LockFreeRingBuffer() = default;
+
+        public:
+            bool push(const T &p_item)
+            {
+                size_t tail = m_tail.load(std::memory_order_relaxed);
+                size_t next_tail = (tail + 1) % m_capacity;
+                if (next_tail == m_head.load(std::memory_order_acquire))
+                    return false; // Full
+                m_buffer[tail] = p_item;
+                m_tail.store(next_tail, std::memory_order_release);
+                return true;
+            }
+
+            bool pop()
+            {
+                size_t head = m_head.load(std::memory_order_relaxed);
+                size_t next_head = (head + 1) % m_capacity;
+                if (head == m_tail.load(std::memory_order_acquire))
+                    return false;
+                m_head.store(next_head, std::memory_order_release);
+                return true;
+            }
+
+            std::optional<T> peek()
+            {
+                size_t head = m_head.load(std::memory_order_relaxed);
+                if (head == m_tail.load(std::memory_order_acquire))
+                    return std::nullopt;
+                T value = m_buffer[head];
+                return value;
+            }
+        };
+
         class Element
         {
         public:
@@ -119,6 +355,7 @@ namespace pjh_std
             virtual void clear() {}
             virtual Element *copy() const = 0;
             virtual string_t serialize() const noexcept { return ""; }
+            virtual string_t pretty_serialize(size_t = 0, char = '\t') const noexcept { return ""; }
 
             virtual bool operator==(const Element &other) const noexcept { return false; }
             virtual bool operator!=(const Element &other) const noexcept { return true; }
@@ -128,6 +365,7 @@ namespace pjh_std
         {
         private:
             value_t m_value;
+            static ObjectPool<Value> pool;
 
         public:
             Value() : m_value(nullptr) {}
@@ -268,12 +506,24 @@ namespace pjh_std
                 else
                     return "";
             }
+
+            string_t pretty_serialize(size_t depth = 0, char = '\t') const noexcept override
+            {
+                return serialize();
+            }
+
+            void *operator new(std::size_t n) { return Value::pool.allocate(n); }
+
+            void operator delete(void *ptr) { Value::pool.deallocate(ptr); }
         };
+
+        inline ObjectPool<Value> Value::pool;
 
         class Array : public Element
         {
         private:
             array_t<Element *> m_arr;
+            static ObjectPool<Array> pool;
 
         public:
             Array() : m_arr() {}
@@ -336,19 +586,42 @@ namespace pjh_std
 
             string_t serialize() const noexcept override
             {
-                string_t new_str;
-                new_str.push_back('[');
+                std::ostringstream oss;
+                oss << '[';
                 bool is_first = true;
                 for (const auto &it : m_arr)
                 {
                     if (is_first)
                         is_first = false;
                     else
-                        new_str.push_back(',');
-                    new_str += it->serialize();
+                        oss << ',';
+                    oss << it->serialize();
                 }
-                new_str.push_back(']');
-                return new_str;
+                oss << ']';
+                return oss.str();
+            }
+
+            string_t pretty_serialize(size_t depth = 0, char table_ch = 't') const noexcept override
+            {
+                std::ostringstream oss;
+                oss << '[' << '\n';
+                bool is_first = true;
+                for (const auto &it : m_arr)
+                {
+                    if (is_first)
+                        is_first = false;
+                    else
+                        oss << ',' << '\n';
+
+                    for (size_t idx = 0; idx <= depth; ++idx)
+                        oss << table_ch;
+                    oss << it->pretty_serialize(depth + 1, table_ch);
+                }
+                oss << '\n';
+                for (size_t idx = 0; idx < depth; ++idx)
+                    oss << table_ch;
+                oss << ']';
+                return oss.str();
             }
 
         public:
@@ -445,11 +718,19 @@ namespace pjh_std
                 for (const Element *child : children)
                     remove(child);
             }
+
+            void *operator new(std::size_t n) { return Array::pool.allocate(n); }
+
+            void operator delete(void *ptr) { Array::pool.deallocate(ptr); }
         };
+
+        inline ObjectPool<Array> Array::pool;
+
         class Object : public Element
         {
         private:
             object_t<Element *> m_obj;
+            static ObjectPool<Object> pool;
 
         public:
             Object() { m_obj.clear(); };
@@ -478,23 +759,49 @@ namespace pjh_std
 
             string_t serialize() const noexcept override
             {
-                string_t new_str;
-                new_str.push_back('{');
+                std::ostringstream oss;
+                oss << '{';
                 bool is_first = true;
                 for (const auto &[k, v] : m_obj)
                 {
-                    new_str.push_back('\"');
-                    new_str += k;
-                    new_str.push_back('\"');
-                    new_str.push_back(':');
-                    new_str += v->serialize();
+                    oss << '\"' << k << '\"' << ':' << v->serialize();
                     if (is_first)
                         is_first = false;
                     else
-                        new_str.push_back(',');
+                        oss << ',';
                 }
-                new_str.push_back('}');
-                return new_str;
+                oss << '}';
+                return oss.str();
+            }
+
+            string_t pretty_serialize(size_t depth = 0, char table_ch = '\t') const noexcept override
+            {
+                std::ostringstream oss;
+                oss << '{' << '\n';
+                bool is_first = true;
+                for (const auto &[k, v] : m_obj)
+                {
+                    if (is_first)
+                        is_first = false;
+                    else
+                        oss << ',' << '\n';
+                    for (size_t idx = 0; idx <= depth; ++idx)
+                        oss << table_ch;
+                    oss << '\"' << k << '\"' << ':';
+                    if (!(v->is_value()))
+                    {
+                        oss << '\n';
+                        for (size_t idx = 0; idx <= depth; ++idx)
+                            oss << table_ch;
+                    }
+                    oss << v->pretty_serialize(depth + 1, table_ch);
+                }
+
+                oss << '\n';
+                for (size_t idx = 0; idx < depth; ++idx)
+                    oss << table_ch;
+                oss << '}';
+                return oss.str();
             }
 
         public:
@@ -583,7 +890,13 @@ namespace pjh_std
             void insert(const string_t &p_key, float p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
             void insert(const string_t &p_key, const string_t &p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
             void insert(const string_t &p_key, char *p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
+
+            void *operator new(std::size_t n) { return Object::pool.allocate(n); }
+
+            void operator delete(void *ptr) { Object::pool.deallocate(ptr); }
         };
+
+        inline ObjectPool<Object> Object::pool;
 
         class Ref
         {
@@ -687,6 +1000,13 @@ namespace pjh_std
             }
 
             Element *get() const { return m_ptr; }
+
+        public:
+            friend std::ostream &operator<<(std::ostream &os, Ref &ref)
+            {
+                os << ref.get()->pretty_serialize(0, ' ');
+                return os;
+            }
         };
 
         Ref make_object(std::initializer_list<std::pair<string_t, Ref>> p_list)
@@ -760,93 +1080,63 @@ namespace pjh_std
         {
         private:
             InputStream stream;
-            char current;
+            char current_ch;
             size_t line;
             size_t column;
 
-            Token current_token;
-            // Get a fronted token, mainly using in parse_array()
-            Token next_token;
-
-            bool is_next_end = true;
+            Token m_current_token;
 
         public:
             // Constructor
-            Tokenizer(const InputStream &stream) : stream(stream), line(1), column(1) { next(); }
+            Tokenizer(const InputStream &stream) : stream(stream), line(1), column(1) { consume(); }
             Tokenizer(const Tokenizer &other) = default;
             ~Tokenizer() = default;
 
             // Token Getter
-            const Token now() const noexcept { return current_token; }
-            const Token forward() const noexcept { return next_token; }
+            const Token peek() const noexcept { return m_current_token; }
 
-            // Get the token (current_token = next_token, next_token updates, return current_token)
-            Token next()
+            void consume() { m_current_token = read_next_token(); }
+
+        private:
+            Token read_next_token()
             {
                 skip_white_space();
                 if (stream.eof())
                 {
-                    if (is_next_end)
-                        return is_next_end = false, current_token = next_token;
-                    else
-                        return {TokenType::End, ""};
+                    return {TokenType::End, ""};
                 }
 
-                current = stream.get();
+                current_ch = stream.get();
                 column++;
 
-                current_token = next_token;
-
-                switch (current)
+                switch (current_ch)
                 {
                 case '{':
-                    next_token = {TokenType::ObjectBegin, "{"};
-                    break;
+                    return {TokenType::ObjectBegin, "{"};
                 case '}':
-                    next_token = {TokenType::ObjectEnd, "}"};
-                    break;
+                    return {TokenType::ObjectEnd, "}"};
                 case '[':
-                    next_token = {TokenType::ArrayBegin, "["};
-                    break;
+                    return {TokenType::ArrayBegin, "["};
                 case ']':
-                    next_token = {TokenType::ArrayEnd, "]"};
-                    break;
+                    return {TokenType::ArrayEnd, "]"};
                 case ':':
-                    next_token = {TokenType::Colon, ":"};
-                    break;
+                    return {TokenType::Colon, ":"};
                 case ',':
-                    next_token = {TokenType::Comma, ","};
-                    break;
+                    return {TokenType::Comma, ","};
                 case '"':
-                    next_token = parse_string();
-                    break;
+                    return parse_string();
                 case 't':
                 case 'f':
-                    next_token = parse_bool();
-                    break;
+                    return parse_bool();
                 case 'n':
-                    next_token = parse_null();
-                    break;
+                    return parse_null();
                 default:
-                    if (isdigit(current) || current == '-')
-                        next_token = parse_number();
+                    if (isdigit(current_ch) || current_ch == '-')
+                        return parse_number();
                     else
-                        throw ParseException(line, column, (std::string) "Unexpected character '" + std::string(1, current) + "'");
+                        throw ParseException(line, column, (std::string) "Unexpected character '" + std::string(1, current_ch) + "'");
                     break;
                 }
-
-                return current_token;
-            }
-
-            // It's proved to be veeeeeeeeeery slow! Don't use it!
-            std::vector<Token> get_all_tokens()
-            {
-                std::vector<Token> _arr;
-                Token _current_token;
-                while ((_current_token = next()).type != TokenType::End)
-                    _arr.push_back(_current_token);
-                _arr.push_back(_current_token);
-                return _arr;
             }
 
         private:
@@ -855,9 +1145,9 @@ namespace pjh_std
             {
                 while (!stream.eof() && (stream.peek() == '\n' || stream.peek() == '\t' || stream.peek() == ' '))
                 {
-                    current = stream.get();
+                    current_ch = stream.get();
                     column++;
-                    if (current == '\n')
+                    if (current_ch == '\n')
                         line++, column = 1;
                 }
             }
@@ -868,12 +1158,12 @@ namespace pjh_std
                 std::string _str;
                 bool is_float = false;
 
-                _str.push_back(current);
+                _str.push_back(current_ch);
                 while (isdigit(stream.forward()) || stream.forward() == '.' || stream.forward() == '-')
                 {
-                    stream.get(current);
-                    is_float = is_float || current == '.';
-                    _str.push_back(current);
+                    stream.get(current_ch);
+                    is_float = is_float || current_ch == '.';
+                    _str.push_back(current_ch);
 
                     column++;
                 }
@@ -886,7 +1176,7 @@ namespace pjh_std
             // Parse Boolean Token, not be much faster after optimization, so I keep it.
             Token parse_bool()
             {
-                if (current == 't')
+                if (current_ch == 't')
                 {
                     expect('r'), expect('u'), expect('e');
                     return {TokenType::Bool, "true"};
@@ -901,14 +1191,14 @@ namespace pjh_std
             Token parse_string()
             {
                 std::string _str;
-                while (stream.get(current))
+                while (stream.get(current_ch))
                 {
                     column++;
-                    if (current == '"')
+                    if (current_ch == '"')
                         break;
-                    if (current == '\\')
-                        stream.get(current);
-                    _str.push_back(current);
+                    if (current_ch == '\\')
+                        stream.get(current_ch);
+                    _str.push_back(current_ch);
                 }
                 return {TokenType::String, _str};
             }
@@ -921,87 +1211,187 @@ namespace pjh_std
 
             void expect(char nextChar)
             {
-                if ((current = stream.get()) != nextChar)
-                    throw ParseException(line, column, (std::string) "Unexpected character '" + std::string(1, current) + "'");
+                if ((current_ch = stream.get()) != nextChar)
+                    throw ParseException(line, column, (std::string) "Unexpected character '" + std::string(1, current_ch) + "'");
                 column++;
             }
         };
 
         class Parser
         {
+        private:
+            LockFreeRingBuffer<Token> m_buffer;
+            Tokenizer *m_tokenizer;
+
         public:
-            static Ref parse(Tokenizer *tokenizer) { return Ref(Parser::parse_value(tokenizer)); }
+            Parser(Tokenizer *p_tokenizer, size_t capacity = 8192)
+                : m_tokenizer(p_tokenizer), m_buffer(capacity) {}
+
+            Ref parse()
+            {
+                std::thread producer_thread(
+                    [&]()
+                    {
+                        try
+                        {
+                            while (true)
+                            {
+                                Token token = m_tokenizer->peek();
+                                if (token.type == TokenType::End)
+                                    break;
+                                while (!m_buffer.push(token))
+                                {
+                                    std::this_thread::sleep_for(std::chrono::microseconds(10));
+                                }
+                                m_tokenizer->consume();
+                            }
+                        }
+                        catch (const std::exception &e)
+                        {
+                            throw ThreadException(e.what());
+                        }
+                    });
+
+                Ref root = Ref(Parser::parse_value());
+                producer_thread.join();
+                return root;
+            }
 
         private:
-            static Element *parse_value(Tokenizer *tokenizer)
+            Token peek()
             {
-                switch (tokenizer->next().type)
+                std::optional<Token> token;
+                while (!(token = m_buffer.peek()).has_value())
+                {
+                    std::this_thread::sleep_for(std::chrono::microseconds(10));
+                }
+                return token.value();
+            }
+            void consume()
+            {
+                while (!m_buffer.pop())
+                {
+                    std::this_thread::sleep_for(std::chrono::microseconds(10));
+                }
+            }
+
+            Element *parse_value()
+            {
+                Token token = peek();
+
+                switch (token.type)
                 {
                 case TokenType::ObjectBegin:
-                    return Parser::parse_object(tokenizer);
+                    return Parser::parse_object();
                 case TokenType::ArrayBegin:
-                    return Parser::parse_array(tokenizer);
+                    return Parser::parse_array();
                 case TokenType::Integer:
-                    return new Value(std::atoi(tokenizer->now().value.c_str()));
+                {
+                    int val = std::atoi(token.value.c_str());
+                    consume();
+                    return new Value(val);
+                }
                 case TokenType::Float:
+                {
                     try
                     {
-                        return new Value((float)std::stod(tokenizer->now().value));
+                        float val = (float)std::stod(token.value);
+                        consume();
+                        return new Value(val);
                     }
                     catch (...)
                     {
-                        throw Exception("Invalid float: " + tokenizer->now().value);
+                        throw Exception("Invalid float: " + token.value);
                     }
+                }
                 case TokenType::Bool:
-                    return new Value((!tokenizer->now().value.empty() && tokenizer->now().value[0] == 't'));
+                {
+                    bool val = token.value[0] == 't';
+                    consume();
+                    return new Value(val);
+                }
                 case TokenType::String:
-                    return new Value(tokenizer->now().value);
+                {
+                    string_t val = token.value;
+                    consume();
+                    return new Value(val);
+                }
                 case TokenType::Null:
+                    consume();
                     return new Value();
                 default:
                     throw TypeException("Unexpected token type");
                 }
             }
 
-            static Object *parse_object(Tokenizer *tokenizer)
+            Object *parse_object()
             {
+                consume();
+
                 Object *obj = new Object();
-                Token tk = tokenizer->next();
 
-                while (tk.type != TokenType::ObjectEnd)
+                if (peek().type == TokenType::ObjectEnd)
                 {
-                    if (tk.type != TokenType::String)
+                    consume();
+                    return obj;
+                }
+
+                while (true)
+                {
+                    Token key_token = peek();
+
+                    if (key_token.type != TokenType::String)
                         throw Exception("Expected string key in object!");
-                    std::string key = tk.value;
+                    std::string key = key_token.value;
+                    consume();
 
-                    tk = tokenizer->next();
-                    if (tk.type != TokenType::Colon)
+                    if (peek().type != TokenType::Colon)
                         throw Exception("Expected colon after key!");
+                    consume();
 
-                    obj->insert_raw_ptr(key, parse_value(tokenizer));
+                    obj->insert_raw_ptr(key, parse_value());
 
-                    tk = tokenizer->next();
-                    if (tk.type == TokenType::Comma)
-                        tk = tokenizer->next();
+                    Token next_token = peek();
+                    if (next_token.type == TokenType::ObjectEnd)
+                    {
+                        consume();
+                        break;
+                    }
+                    else if (next_token.type == TokenType::Comma)
+                        consume();
+                    else
+                        throw Exception("Expected ',' or '}' in object");
                 }
 
                 return obj;
             }
 
-            static Array *parse_array(Tokenizer *tokenizer)
+            Array *parse_array()
             {
+                consume();
                 Array *arr = new Array();
-                Token tk = tokenizer->forward();
-                bool is_empty = true;
 
-                while (tk.type != TokenType::ArrayEnd)
+                if (peek().type == TokenType::ArrayEnd)
                 {
-                    is_empty = false;
-                    arr->append_raw_ptr(parse_value(tokenizer));
-                    tk = tokenizer->next();
+                    consume();
+                    return arr;
                 }
-                if (is_empty)
-                    tk = tokenizer->next();
+
+                while (true)
+                {
+                    arr->append_raw_ptr(parse_value());
+
+                    Token next_token = peek();
+                    if (next_token.type == TokenType::ArrayEnd)
+                    {
+                        consume();
+                        break;
+                    }
+                    else if (next_token.type == TokenType::Comma)
+                        consume();
+                    else
+                        throw Exception("Expected ',' or ']' in array");
+                }
 
                 return arr;
             }

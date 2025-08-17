@@ -415,208 +415,75 @@ struct Token {
 
 #### 4.2 实现 `Tokenizer`
 
-`Tokenizer` 的核心是一个 `next()` 方法，每次调用，它就从输入流中读取并返回下一个有效的 `Token`。
+`Tokenizer` 的核心是暴露给外部的 `peek()` 和 `consume()` 接口。它内部像一个“预读”的机器，时刻准备好下一个将要被解析的 `Token`。
 
 ```cpp
 // tokenizer.hpp
-
 // InputStream 是一个辅助类，封装了字符串和当前读取位置，便于操作
 class InputStream { /* ... get(), peek(), eof() ... */ };
 
-class Tokenizer
-{
+class Tokenizer {
 private:
     InputStream stream;
-    char current;
+    char current_ch;
     size_t line;
     size_t column;
-
-    // 为了解析 Array，这里需要提前读入下一个 Token
-    Token current_token;
-    Token next_token;
-
-    // 是否下一个位置输入结束
-    bool is_next_end = true;
+    Token m_current_token; // 核心：内部缓冲的“当前”Token
 
 public:
-    Tokenizer(const InputStream& stream) : stream(stream), line(1), column(1) { next(); }
-
-    const Token now() const noexcept { return current_token; }
-    const Token forward() const noexcept { return next_token; }
-
-    Token next()
-    {
-        skip_white_space(); // 第一步：跳过所有无意义的空白符
-
-        if (stream.eof())
-        {
-            if (is_next_end)
-                return is_next_end = false, current_token = next_token;
-                // 第一次读完是 next_token，第二次才是真正读完
-            else
-                return {TokenType::End, ""}; // 如果读完了，返回 End Token
-        }
-
-        current = stream.get(); // 读取当前字符
-        column++;
-
-        // 每次都需要下一个，因此只要把 current 设为 next 即可
-        current_token = next_token;
-
-        // 第二步：根据当前字符，判断下一个 Token 类型
-        switch (current)
-        {
-        case '{':
-            next_token = {TokenType::ObjectBegin, "{"};
-            break;
-        case '}':
-            next_token = {TokenType::ObjectEnd, "}"};
-            break;
-        case '[':
-            next_token = {TokenType::ArrayBegin, "["};
-            break;
-        case ']':
-            next_token = {TokenType::ArrayEnd, "]"};
-            break;
-        case ':':
-            next_token = {TokenType::Colon, ":"};
-            break;
-        case ',':
-            next_token = {TokenType::Comma, ","};
-            break;
-        // 第三步：对于复杂类型，调用专门的解析函数
-        case '"':
-            next_token = parse_string();
-            break;
-        case 't':
-        case 'f':
-            next_token = parse_bool();
-            break;
-        case 'n':
-            next_token = parse_null();
-            break;
-        default:
-            if (isdigit(current) || current == '-')
-                next_token = parse_number();
-            else
-                // 第四步：遇到未知字符，抛出带有位置信息的异常
-                throw ParseException(line, column, (std::string) "Unexpected character '" + std::string(1, current) + "'");
-            break;
-        }
-
-        return current_token;
+    // 构造时，立刻读取第一个 Token 待命
+    Tokenizer(const InputStream& stream) : stream(stream), line(1), column(1) {
+        consume();
     }
+
+    // 接口1：“窥视” (Peek) - 查看下一个 Token 是什么，不改变状态
+    const Token& peek() const noexcept { return m_current_token; }
+
+    // 接口2：“消耗” (Consume) - 确认当前 Token 已处理，前进到下一个
+    void consume() { m_current_token = read_next_token(); }
 
 private:
-    // 跳过空格、制表符、换行符
-    void skip_white_space()
-    { 
-        while (
-            !stream.eof() &&
-            (
-                stream.peek() == '\n' ||
-                stream.peek() == '\t' ||
-                stream.peek() == ' '
-            )
-        )
-        {
-            current = stream.get();
-            column++;
-            if (current == '\n')
-                line++, column = 1;
-        }
-    }
-
-    // 指定读取的下一个字符值，用于处理关键字
-    void expect(char nextChar)
+    // 真正读取并解析下一个 Token 的内部实现
+    Token read_next_token()
     {
-        if ((current = stream.get()) != nextChar)
-            throw ParseException(
-                line, 
-                column, 
-                (std::string) "Unexpected character '" + std::string(1, current) + "'"
-                );
+        skip_white_space(); // 跳过空白符
+        // 输入结束
+        if (stream.eof()) { return {TokenType::End, ""}; }
+
+        current_ch = stream.get();
         column++;
-    }
 
-    // 从 " 开始，一直读到下一个 "
-    Token parse_string()
-    {
-        std::string _str;
-        while (stream.get(current))
-        {
-            column++;
-            if (current == '"')
-                break;
-            if (current == '\\')
-                stream.get(current);
-            _str.push_back(current);
-        }
-        return {TokenType::String, _str};
-    }
-
-    // 从数字或'-'开始，读取一个完整的整数或浮点数
-    Token parse_number()
-    { 
-        std::string _str;
-        bool is_float = false;
-
-        _str.push_back(current);
-        while (
-            isdigit(stream.forward()) || 
-            stream.forward() == '.' || 
-            stream.forward() == '-'
-            )
-        {
-            stream.get(current);
-            is_float = is_float || current == '.';
-            _str.push_back(current);
-
-            column++;
-        }
-
-        if (isdigit(stream.peek()))
-            _str.push_back(stream.get());
-
-        return {is_float ? TokenType::Float : TokenType::Integer, _str}
-    }
-
-    // 读取并验证 true 或 false
-    Token parse_bool() 
-    {
-        if (current == 't')
-        {
-            expect('r'), expect('u'), expect('e');
-            return {TokenType::Bool, "true"};
-        }
-        else
-        {
-            expect('a'), expect('l'), expect('s'), expect('e');
-            return {TokenType::Bool, "false"};
+        switch (current_ch) {
+            case '{': return {TokenType::ObjectBegin, "{"};
+            // ... 其他简单符号 ...
+            case '"': return parse_string();
+            case 't':
+            case 'f': return parse_bool();
+            case 'n': return parse_null();
+            default:
+                if (isdigit(current_ch) || current_ch == '-')
+                    return parse_number();
+                else
+                    throw ParseException(line, column, "Unexpected character");
         }
     }
-
-    // 读取并验证 null
-    Token parse_null()
-    {
-        expect('u'), expect('l'), expect('l');
-        return {TokenType::Null, "null"};
-    }
+    // ... parse_string(), parse_number() 等辅助函数 ...
 };
 ```
 
 #### 设计细节剖析：
 
-1. **关注点分离**：<br>
-`Tokenizer` 的设计完美体现了“单一职责原则”。<br>
-它不关心 JSON 的语法结构（比如一个 key 后面是否必须跟一个冒号），它只关心如何准确地识别出每一个独立的词法单元。<br>
-这种解耦使得代码更清晰，也更容易维护。
+1. **清晰的“契约”**：<br>
+这个 `Tokenizer` 的设计向它的使用者 (`Parser`) 提供了一个非常清晰的契约：<br>
+- `peek()`：一个只读操作。你可以无限次调用它，它总是告诉你下一个将要处理的 `Token` 是什么，而不会改变 `Token` 流的状态。<br>
+- `consume()`：一个只写操作。它像一个确认按钮，告诉 `Tokenizer`：“我已经处理完 `peek()` 看到的那个 `Token` 了，请准备好下一个”。<br>
+这种“读写分离”的接口设计，是构建健壮解析器的关键，它极大地简化了 `Parser` 的逻辑。
 
 2. **状态机思想**：<br>
 `next()` 方法本质上是一个简单的状态机。<br>
 它读取一个字符，然后根据这个字符转换到不同的处理逻辑（返回一个简单的 `Token`，或者进入一个更复杂的 `parse_...` 函数）。
 
-3. 详细的错误报告：<br>
+3. **详细的错误报告**：<br>
 当遇到一个无法识别的字符时，我们不能简单地失败。<br>
 通过追踪当前的 `line` 和 `column`，`ParseException` 可以告诉用户错误发生的确切位置。<br>
 这对于调试不规范的 JSON 输入至关重要，是提升工具可用性的关键一步。
@@ -638,110 +505,36 @@ private:
 为语法中的每一种结构（比如 `Value`, `Object`, `Array`）编写一个对应的解析函数。<br>
 当一个函数需要解析一个内嵌的结构时，它就去调用那个结构对应的解析函数。
 
-#### 5.1 `Parser` 类 - 静态方法的集合
+#### 5.1 `Parser` 类 - 一个有状态的建筑师
 
 我们的 `Parser` 将是一个纯静态类，因为它不需要存储任何状态，它的工作就是接收一个 `Tokenizer`，然后输出一个 `Element*`
 
-```cpp
-// parser.hpp
+与 `Tokenizer` 类似，`Parser` 是一个真正的对象。它拥有自己的状态，并封装了完整的解析流程。
 
+```cpp
+// json.hpp
 class Parser
 {
+private:
+    // Parser 拥有自己的 Tokenizer 实例指针
+    Tokenizer* m_tokenizer;
+
 public:
-    // 总入口（这里的 Ref 是之后实现的指针封装）
-    static Ref parse(Tokenizer* tokenizer)
-    { return Ref(Parser::parse_value(tokenizer)); }
+    Parser(Tokenizer* p_tokenizer) : m_tokenizer(p_tokenizer) {}
+
+    // 统一的入口点
+    Ref parse() { return Ref(parse_value()); }
 
 private:
-    // 核心中枢：根据当前 Token 类型，分发到不同的解析函数
-    static Element *parse_value(Tokenizer *tokenizer)
-    {
-        switch (tokenizer->next().type)
-        {
-        case TokenType::ObjectBegin:
-            return Parser::parse_object(tokenizer);
-        case TokenType::ArrayBegin:
-            return Parser::parse_array(tokenizer);
-        case TokenType::Integer:
-            return new Value(std::atoi(tokenizer->now().value.c_str()));
-        case TokenType::Float:
-            try { return new Value((float)std::stod(tokenizer->now().value)); }
-            catch (...) { throw Exception("Invalid float: " + tokenizer->now().value); }
-        case TokenType::Bool:
-            return new Value((!tokenizer->now().value.empty() && tokenizer->now().value[0] == 't'));
-        case TokenType::String:
-            return new Value(tokenizer->now().value);
-        case TokenType::Null:
-            return new Value();
-        default:
-            throw TypeException("Unexpected token type");
-        }
-    }
+    // 便捷的内部接口，封装与 Tokenizer 的交互
+    const Token& peek() const noexcept { return m_tokenizer->peek(); }
+    void consume() { m_tokenizer->consume(); }
 
-    // ... parse_object 和 parse_array 的实现 ...
+    // 核心的递归下降函数
+    Element* parse_value();
+    Object* parse_object();
+    Array* parse_array();
 };
-```
-
-`parse_value` 是我们递归的起点和核心。它就像一个交通枢纽，根据 `Tokenizer` 提供的当前 `Token`，决定下一步应该走向何方。
-
-#### 5.2 解析 `Object` 和 `Array` - 递归的魔力
-
-`parse_object` 的任务是解析 `{ "key": value, ... }` 这样的结构。
-
-```cpp
-// 在 Parser 类中
-static Object* parse_object(Tokenizer* tokenizer) {
-    Object* obj = new Object();
-    Token tk = tokenizer->next(); // 消耗掉 '{'，获取下一个 Token
-
-    while (tk.type != TokenType::ObjectEnd) { // 循环直到我们遇到 '}'
-        // 1. 期待一个字符串作为 key
-        if (tk.type != TokenType::String)
-            throw Exception("Expected string key in object!");
-        std::string key = tk.value;
-
-        // 2. 期待一个冒号 ':'
-        tk = tokenizer->next();
-        if (tk.type != TokenType::Colon)
-            throw Exception("Expected colon after key!");
-
-        // 3. 递归调用 parse_value() 来解析这个 key 对应的值
-        obj->insert_raw_ptr(key, parse_value(tokenizer));
-
-        // 4. 处理下一个元素，可能是逗号 ',' 或结束符 '}'
-        tk = tokenizer->next();
-        if (tk.type == TokenType::Comma)
-            tk = tokenizer->next(); // 消耗掉逗号，准备解析下一个键值对
-        else if (tk.type != TokenType::ObjectEnd)
-            throw Exception("Expected comma or '}' in object");
-    }
-
-    return obj;
-}
-```
-
-`parse_array` 的逻辑与此类似，但更简单，因为它只需要处理值，而不需要处理键。
-
-```cpp
-static Array *parse_array(Tokenizer *tokenizer)
-{
-    Array *arr = new Array();
-    Token tk = tokenizer->forward(); // 需要提前看下一个 Token 以平凡化处理空数组的情况
-    bool is_empty = true;
-
-    while (tk.type != TokenType::ArrayEnd) // 循环直到下一个 Token 是 ']'
-    {
-        is_empty = false;
-        arr->append_raw_ptr(parse_value(tokenizer)); // 递归调用 parse_value() 来解析这个对象对应的值
-        tk = tokenizer->next(); // 消耗掉逗号，准备解析下一个元素
-    }
-
-    // 如果是空数组，得多消耗掉 ']'，不然会少消耗一个字符
-    if (is_empty)
-        tk = tokenizer->next();
-
-    return arr;
-}
 ```
 
 #### 设计细节剖析：
@@ -762,7 +555,106 @@ static Array *parse_array(Tokenizer *tokenizer)
 `Parser` 不断地向 `Tokenizer` 请求 `next()` 下一个 `Token`，并根据 `Token` 的类型来推进自己的解析逻辑。<br>
 这是一个经典的生产者-消费者模式。<br>
 
-我们成功了！通过 `Tokenizer` 和 `Parser` 的协作，我们已经能将任意复杂的 JSON 字符串，转换成我们精心设计的、在内存中的 `Element` 对象树。
+#### 5.2 递归下降的实现
+
+现在，我们来实现具体的解析函数，感受一下“代码即语法”的魅力。
+
+`parse_value()`：交通枢纽
+
+```cpp
+// 在 Parser 类中
+Element* Parser::parse_value() 
+{
+    const Token& token = peek(); // 1. Peek
+
+    switch (token.type) {
+        case TokenType::ObjectBegin:
+            return parse_object(); // 2. Process (递归)
+        case TokenType::ArrayBegin:
+            return parse_array();  // 2. Process (递归)
+        
+        // 对于基础类型，直接处理
+        case TokenType::Integer: 
+        {
+            int val = std::atoi(token.value.c_str());
+            consume();             // 3. Consume
+            return new Value(val);
+        }
+        // ... 其他基础类型的处理逻辑完全相同 ...
+        default:
+            throw TypeException("Unexpected token for a value");
+    }
+}
+```
+
+`parse_object()`：构建复杂结构
+
+```cpp
+// 在 Parser 类中
+Object* Parser::parse_object() 
+{
+    consume(); // 前提：已知当前是 '{', 消耗掉它
+
+    Object* obj = new Object();
+    
+    // 处理空对象 {} 的情况
+    if (peek().type == TokenType::ObjectEnd) 
+    {
+        consume(); // 消耗 '}'
+        return obj;
+    }
+
+    while (true) 
+    {
+        // 1. 期待 Key
+        const Token& key_token = peek();
+        if (key_token.type != TokenType::String) throw Exception("Expected string key");
+        std::string key = key_token.value;
+        consume(); // 消耗 Key
+
+        // 2. 期待 Colon
+        if (peek().type != TokenType::Colon) throw Exception("Expected colon");
+        consume(); // 消耗 ':'
+
+        // 3. 递归解析 Value。把复杂的任务委托出去！
+        obj->insert_raw_ptr(key, parse_value());
+
+        // 4. 检查下一个是逗号还是结束符
+        const Token& next_token = peek();
+        if (next_token.type == TokenType::ObjectEnd) 
+        {
+            consume(); // 消耗 '}'
+            break;     // 循环结束
+        }
+        else if (next_token.type == TokenType::Comma)
+            consume(); // 消耗 ','，准备下一个键值对
+        else throw Exception("Expected comma or '}'");
+    }
+    return obj;
+}
+```
+
+`parse_array` 的实现也遵循着完全相同的严谨逻辑。
+
+#### 最终设计剖析：
+
+1.  **代码结构镜像语法结构**：<br>
+递归下降最美妙的地方在于，代码的结构几乎就是 JSON 语法的直接翻译。<br>
+`parse_object` 的 `while` 循环完美地对应了对象中“一个接一个的键值对”的结构。这种直观性使得代码易于理解和调试。
+
+2.  **递归的体现**：<br>
+当 `parse_object` 需要一个值时，它并不关心这个值是简单的 `123` 还是一个复杂的嵌套对象。它只是简单地把这个任务委托给 `parse_value`。<br>
+而 `parse_value` 如果发现下一个 Token 是 `{`，又会反过来调用 `parse_object`。<br>
+这个过程就形成了递归，完美地处理了 JSON 无限嵌套的能力。
+
+3.  **严谨的状态推进**：<br>
+`Parser` 严格遵循 **Peek -> Process -> Consume** 的韵律。<br>
+每个 Token 在被 `peek()` 确认其角色后，都会被立即 `consume()`。<br>
+这确保了解析器总是在单向、无回溯地前进，逻辑清晰，不会出错。
+
+我们成功了！通过一个清晰的 `Tokenizer` 和一个有状态的 `Parser` 的协作，我们已经能将任意复杂的 JSON 字符串，转换成我们精心设计的、在内存中的 `Element` 对象树。
+
+
 
 ## 五、锦上添花 - 便捷的 API 封装 (`Ref`) 与总结
 
@@ -892,7 +784,7 @@ delete root.get();
 
 为了实现它，我们将引入一系列 **工厂函数 (Factory Functions)**。
 
-### 7.1 核心思想：隐藏 `new` 关键字
+### 6.1 核心思想：隐藏 `new` 关键字
 
 工厂函数的核心思想非常简单：<br>
 将 `new` 关键字和对象的具体构造过程封装到一个独立的函数里。<br>
@@ -901,8 +793,8 @@ delete root.get();
 对于我们的库，用户真正关心的类型是 `Ref`，而不是底层的 `Object*`、`Array*` 或 `Value*`。<br>
 因此，我们的工厂函数将接收 C++ 的字面量（如 `123`, `"hello"`），并返回一个封装好的 `Ref` 对象。
 
-### 7.2 第一块积木：`make_value`
-我们先为最基础的 Value 类型创建工厂函数。这是一组重载函数，每一种都对应一种 C++ 的基础类型。
+### 6.2 第一块积木：`make_value`
+我们先为最基础的 `Value` 类型创建工厂函数。这是一组重载函数，每一种都对应一种 C++ 的基础类型。
 
 ```cpp
 // json_ref.hpp (新添加的工厂函数)
@@ -923,7 +815,7 @@ Ref make_value(char* p_val) { return Ref(new Value((string_t)p_val)); }
 无论你想创建哪种类型的 `Value`，函数名都是 `make_value`。<br>
 C++ 的函数重载机制会根据你传入的参数类型，自动选择正确的版本。
 
-### 7.3 构建容器：`make_array` 和 `make_object`
+### 6.3 构建容器：`make_array` 和 `make_object`
 现在，我们利用 `std::initializer_list` 来为容器类型创建工厂。
 
 **对于 `Array`**：<br>
@@ -969,7 +861,7 @@ Ref make_object(std::initializer_list<std::pair<string_t, Ref>> p_list)
 `make_object` 的值可以是另一个 `make_array` 的结果，而 `make_array` 的元素又可以是 `make_value` 的结果。<br>
 这种组合能力，让我们能够以声明式的方式构建出任意复杂的 JSON 树。
 
-### 7.4 一个重大的设计权衡：内存管理
+### 6.4 一个重大的设计权衡：内存管理
 
 我们的新 API 非常优雅，但它引入了一个必须高度警惕的问题。
 
@@ -1030,7 +922,635 @@ delete root.get();
 
 通过理解这一点，你对软件设计的理解又深入了一层。
 
-## 七、总结与展望
+## 七、性能的飞跃 - 为你的 JSON 王国建造高速公路 (对象池)
+
+我们的 JSON 库到目前为止，功能已经非常完备。但在一个追求性能的世界里，“能用”只是起点，“够快”才是王道。现在，我们将着手进行一次激动人心的性能优化，其效果立竿见影，并能让你的库达到工业级的性能水准。
+
+### 7.1 发现瓶颈：`new` 和 `delete` 的无情开销
+
+想象一下解析一个包含成千上万个键值对的大型 JSON 文件。我们的 `Parser` 每遇到一个数字、一个字符串、一个数组或一个对象，都会执行一次 `new` 操作。
+
+```cpp
+new Value(123);
+new Object();
+new Array();
+```
+
+`new` 操作看起来很简单，但它背后隐藏着一系列重量级的动作：<br>
+它需要向操作系统请求堆内存，这个过程可能涉及到线程锁定、复杂的内存寻址算法，对于频繁创建和销毁大量小对象的场景（比如我们的 JSON 解析器），这会成为一个巨大的性能瓶颈。
+
+我们能否绕过这个瓶颈？答案是肯定的。我们将采用一种经典的高性能内存管理模式：对象池 (`ObjectPool`)。
+
+### 7.2 解决方案：批发代替零售 (对象池原理)
+
+对象池的思想非常直观：
+
+1. **预先批发**：我们不再在需要时才向系统零散地申请内存，而是一开始就申请一大块内存，或者按照固定的“块(Block)”来批量申请。
+
+2. **内部零售**：当需要一个新对象时，我们从预先申请好的内存中快速切出一小块来使用。这个过程通常只是移动一下指针，速度极快，完全避免了与操作系统的昂贵交互。
+
+3. **循环利用**：当一个对象被 `delete` 时，我们不把它归还给操作系统，而是将其回收，放回到池中，以备下次分配时循环使用。
+
+### 7.3 第一步：解耦设计 - 灵活的 `Allocator` 策略
+
+不同的使用场景可能需要不同的内存分配策略。<br>
+比如，解析器可能最适合一次性分配、永不回收的“区块分配器”，而其他场景可能需要能高效回收和重用内存的“自由列表分配器”。
+
+为了实现这种灵活性，我们首先定义一个抽象的 `Allocator` 接口，然后创建几种具体的实现。这正是设计模式中的 **策略模式 (Strategy Pattern)**。
+
+```cpp
+// allocator.hpp
+// 1. 定义策略接口 (这里使用了虚函数实现动态多态)
+template <typename T>
+class Allocator 
+{
+public:
+    virtual ~Allocator() = default;
+
+    virtual T* allocate(size_t n) = 0;
+    virtual void deallocate(T* ptr) = 0;
+};
+
+// 2. 策略A：默认分配器 (MallocAllocator)
+// 一般情况下 C++ 内部的默认实现
+template <typename T>
+class MallocAllocator : public Allocator<T> 
+{
+public:
+    T *allocate(size_t n)
+    {
+        void *raw = ::malloc(n);
+        if (!raw)
+            throw std::bad_alloc();
+        return reinterpret_cast<T *>(raw);
+    }
+
+    void deallocate(T *ptr)
+    {
+        ::free(ptr);
+    }
+};
+
+// 3. 策略B：区块分配器 (BlockAllocator)
+// 这是最高效的策略之一，适合解析这种一次性大量分配的场景
+template <typename T, size_t BlockSize = 1024>
+class BlockAllocator : public Allocator<T> 
+{
+private:
+    std::vector<void*> blocks;
+    T* currentBlock = nullptr;
+    size_t remaining = 0;
+
+public:
+    ~BlockAllocator() 
+    {
+         // 释放所有 blocks
+        for (void *block : blocks)
+            ::free(block);
+    }
+
+    T* allocate(size_t n) override
+    {
+        if (remaining == 0)
+        {
+            // 当前块用完了，就去批发一大块新的
+            void* block = ::malloc(sizeof(T) * BlockSize);
+            blocks.push_back(block);
+            currentBlock = reinterpret_cast<T*>(block);
+            remaining = BlockSize;
+        }
+
+        // 从当前块中快速切出一个对象的位置
+        T* obj = currentBlock++;
+        --remaining;
+        return obj;
+    }
+
+    void deallocate(T* ptr) override
+    {
+        // 在这个策略里，我们通常什么都不做，等到最后统一释放所有 blocks
+    }
+};
+
+// 4. 策略C：自由列表分配器 (FreeListAllocator)
+// 这个策略能高效地回收和重用被释放的对象
+template <typename T>
+class FreeListAllocator : public Allocator<T> 
+{
+    struct Node
+    {
+        Node *next;
+    };
+    Node *freeList = nullptr;
+
+public:
+    ~FreeListAllocator()
+    {
+        // 等到析构的时候再统一释放链表内的内存
+        while (freeList)
+        {
+            Node *tmp = freeList;
+            freeList = freeList->next;
+            ::free(tmp);
+        }
+    }
+
+    T *allocate(size_t n)
+    {
+        // 对已经回收的内存链表再利用
+        if (freeList)
+        {
+            Node *node = freeList;
+            freeList = node->next;
+            return reinterpret_cast<T *>(node);
+        }
+        void *raw = ::malloc(n);
+        if (!raw)
+            throw std::bad_alloc();
+        return reinterpret_cast<T *>(raw);
+    }
+
+    void deallocate(T *ptr)
+    {
+        // 每次回收内存并不释放，而是加入链表
+        Node *node = reinterpret_cast<Node *>(ptr);
+        node->next = freeList;
+        freeList = node;
+    }
+};
+```
+
+#### 设计细节剖析：
+
+- 抽象与实现分离：<br>
+`Allocator` 基类定义了“做什么”（分配/释放），<br>
+而 `BlockAllocator` 等子类则定义了“怎么做”。<br>
+这使得我们的上层代码（对象池）可以与具体的分配策略解耦。
+
+- `BlockAllocator` 的智慧：<br>
+这个分配器是性能优化的关键。<br>
+它的 `allocate` 函数几乎只做了几次指针运算，没有任何复杂的逻辑。<br>
+它的 `deallocate` 是空操作，因为它的哲学是“只进不退”，所有内存都在最后统一释放，这完美匹配了 JSON 解析器的生命周期。
+
+### 7.4 第二步：构建 `ObjectPool`
+
+`ObjectPool` 是一个简单的封装，它持有一个我们选择的 `Allocator` 策略实例，并向外提供分配/释放的接口。
+
+```cpp
+// object_pool.hpp
+template <typename T, typename Alloc = BlockAllocator<T>>
+class ObjectPool
+{
+private:
+    Alloc m_allocator;
+
+public:
+    T* allocate(size_t n) { return m_allocator.allocate(n); }
+    void deallocate(void* ptr) 
+    { m_allocator.deallocate(static_cast<T*>(ptr)); }
+};
+```
+
+#### 设计细节剖析：
+
+- 编译期策略选择：<br>
+通过模板参数 `Alloc = BlockAllocator<T>`，我们在编译期就决定了对象池将使用哪种分配策略。<br>
+这比在运行时传入一个 `Allocator*` 指针效率更高，因为它避免了虚函数调用，为编译器内联优化打开了大门。
+
+实际上，为了彻底避免虚函数调用，`Allocator` 基类完全可以省去。<br>
+它的教学作用已经完成，当时在子类里写上的 `override` 可以借助编译器的检查来避免虚函数接口参数对不上。<br>
+其他类型由于拥有自己的 `allocate` 和 `deallocate` 函数，即使删去基类也能在编译期自动确定下策略。
+
+### 7.5 第三步：无缝集成 - `operator new/delete` 的重载魔法
+
+现在我们有了 `ObjectPool`，如何让 `new Value(...)` 这样的代码自动地从我们的池中获取内存，而不是从全局堆中获取呢？<br>
+答案是：重载 `operator new` 和 `operator delete`。
+
+这是 C++ 赋予我们的强大能力，可以直接改变一个类的内存分配行为。
+
+```cpp
+// json_value.hpp
+// 在 Value 类中
+class Value : public Element {
+private:
+    // 关键1：每个类拥有一个静态的、自己的对象池
+    static ObjectPool<Value> pool;
+    value_t m_value;
+
+public:
+    // ... 构造函数等 ...
+
+    // 关键2：重载 new 和 delete
+    void* operator new(std::size_t n) {
+        // 当写 new Value(...) 时，这个函数会被调用来获取内存
+        return Value::pool.allocate(n);
+    }
+
+    void operator delete(void* ptr) {
+        // 当写 delete value_ptr 时，这个函数会被调用来释放内存
+        Value::pool.deallocate(ptr);
+    }
+};
+// 关键3：在类外定义并初始化静态成员
+inline ObjectPool<Value> Value::pool;
+
+// 对 Array 和 Object 类做完全相同的改造
+/* ... */
+```
+
+#### 设计细节剖析：
+
+- **透明的魔法**：<br>
+这次重构最美妙的地方在于它的透明性。<br>
+我们不需要去修改 `Parser` 内部成百上千处 `new Value(...)` 的代码。我们只是改变了 `new` 这个关键字对于 `Value`、`Array` 和 `Object` 的底层含义。<br>
+现在，`new Value` 不再是请求系统内存，而是向 `Value::pool` 请求一个对象。
+
+- **静态对象池**：<br>
+每个 `Element` 子类（`Value`, `Array`, `Object`）都拥有一个属于自己的 `static` 对象池。<br>
+这意味着所有的 `Value` 对象都从同一个池中分配，所有的 `Array` 对象从另一个池中分配。<br>
+这种分离管理使得内存布局更规整，也更符合对象池的设计初衷。
+
+- **`inline` 关键字 (C++17+)**：<br>
+在头文件中直接定义并初始化一个静态成员变量，需要使用 `inline` 关键字，以防止在多个编译单元中包含此头文件时出现链接错误。<br>
+这是一个现代 C++ 的便利特性。
+
+### 7.6 成果与展望
+
+我们成功了！通过引入一套灵活的 Allocator 策略，并利用 ObjectPool 和 operator new/delete 重载，我们将 JSON 库的性能提升到了一个全新的高度。
+
+#### 我们获得了什么？
+
+1. **极高的性能**：<br>
+解析和构建过程中的内存分配速度得到了数量级的提升。
+
+2. **优雅的实现**：<br>
+性能的提升几乎没有“污染”我们的核心解析逻辑代码，`Parser` 依然可以干净地写着 `new Value`。
+
+3. **高度的灵活性**：<br>
+如果未来我们发现 `BlockAllocator` 不适合某个场景，我们只需要在 `ObjectPool` 的模板参数里换上 `FreeListAllocator`，就可以轻松切换内存管理策略，而无需改动任何其他代码。
+
+这次重构不仅仅是一次性能优化，它更是一次深刻的架构设计实践。<br>
+它向我们展示了如何通过抽象、策略模式和 C++ 的底层语言特性，来构建一个既高性能又易于维护的复杂系统。
+
+我们的 JSON 王国，现在不仅宏伟，而且拥有了四通八达的高速公路。
+
+## 八、最终前沿 - 驶向并发，构建多线程解析器
+
+我们的 JSON 王国至今已是宏伟壮丽，性能卓越。但在追求极致的道路上，我们还有最后一张王牌尚未打出——并发。
+
+在单核性能已近极限的今天，解锁多核 CPU 的并行处理能力，是让我们的库产生质的飞跃的关键。
+
+在这一章，我们将进行最激动人心的改造：<br>
+将 `Tokenizer` (生产者) 和 `Parser` (消费者) 分置于不同的线程，让它们像一条高效的工厂流水线，协同完成 JSON 的解析工作。
+
+### 8.1 蓝图：生产者-消费者流水线
+
+我们的并发模型基于一个经典而强大的设计模式——**生产者-消费者 (Producer-Consumer)**。
+
+1. **生产者 (The Producer)**：<br>
+一个专门的 `Tokenizer` 线程。<br>
+它的职责只有一个：心无旁骛地读取原始字符串，将其切割成 `Token` 这种“半成品”。
+
+2. **传送带 (The Conveyor Belt)**：<br>
+一个 **线程安全** 的 `Channel`。<br>
+它负责将生产好的 `Token` 从生产者安全、有序地运送到消费者那里。
+
+3. **消费者 (The Consumer)**：<br>
+主线程或另一个专门的 `Parser` 线程。<br>
+它的职责是从传送带上取下 `Token`，并将其组装成最终的 `Element` 成品。
+
+这种设计的巨大优势在于，当 `Parser` 正在进行 CPU 密集型的树结构组建时 (`switch`, `new`, `insert`)，`Tokenizer` 可以在另一个 CPU 核心上同时进行词法分析，两者互不等待，极大地提升了整体的吞吐量。
+
+### 8.2 传送带的设计：**线程安全** 的 `Channel`
+
+要让流水线安全运转，我们需要一个特制的“传送带”，它必须保证在任何时候只有一个工人（线程）能操作它。<br>
+这就是线程安全的 `Channel` (有时也叫 **阻塞队列**)。
+
+它的核心是使用 `std::mutex` (互斥锁) 和 `std::condition_variable` (条件变量)。
+
+```cpp
+// channel.hpp
+template <typename T>
+class Channel
+{
+private:
+    size_t m_capacity;
+    std::queue<T> m_queue;
+    std::mutex m_mutex;
+    std::condition_variable m_cond_not_empty;
+    std::condition_variable m_cond_not_full;
+
+public:
+    // 构造函数，析构函数...
+
+    void push(const T& p_item)
+    {
+        std::unique_lock<std::mutex> lock(m_mutex); // 1. 上锁
+        // ... 如果队列有容量限制，则解锁并休眠，在这里等待 ...（m_capacity 为 0 时不限制队列内元素数）
+        m_cond_not_full.wait(
+            lock, [&]()
+            { return m_capacity == 0 || m_queue.size() < m_capacity; });
+        m_queue.push(p_item);
+        lock.unlock(); // 2. 解锁
+        m_cond_not_empty.notify_one(); // 3. 唤醒可能在等待的消费者
+    }
+
+    void pop()
+    {
+        std::unique_lock<std::mutex> lock(m_mutex); // 1. 上锁
+        // ... 如果队列为空，则解锁并休眠，直到被唤醒 ...
+        m_cond_not_empty.wait(
+            lock, [&]()
+            { return !m_queue.empty(); });
+        m_queue.pop();
+        lock.unlock(); // 2. 解锁
+        m_cond_not_full.notify_one(); // 3. 唤醒可能在等待的生产者
+    }
+    
+    // 我们还需要一个 peek 方法，用于“偷看”但不取出
+    T peek()
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cond_not_empty.wait(lock, [&](){ return !m_queue.empty(); });
+        T item = m_queue.front(); // 注意：这里返回的是拷贝
+        lock.unlock(); // 立即解锁
+        return item;
+    }
+};
+```
+
+#### 设计细节剖析：
+
+- **`std::mutex`**：<br>
+像是一把钥匙。任何线程想要操作队列，必须先拿到这把钥匙。
+
+- **`std::condition_variable`**：<br>
+一个高效的“等待室”。<br>
+当消费者发现队列是空的，它不会疯狂地空转浪费 CPU，而是进入这个等待室“睡觉”，直到生产者 `push` 了新东西后通过 `notify_one()` 把它“叫醒”。
+
+- **`peek()` 的实现**：<br>
+为了绝对的安全，避免返回一个可能很快就失效的内部引用，我们的 `peek()` 方法返回一个 `Token` 的拷贝。<br>
+对于 `Token` 这样的小对象，这个开销是值得的。
+
+### 8.3 架构演进：`Parser` 成为并发“总指挥”
+
+要使用 `Channel`，我们的 `Parser` 对象的角色必须再次进化。
+
+它不再直接与 `Tokenizer` 对话，而是作为“总指挥”，通过 `Channel` 与在另一个线程的 `Tokenizer` 协同工作。
+
+```cpp
+// parser.hpp (Parser 的新设计)
+class Parser 
+{
+private:
+    // Parser 现在拥有自己的“传送带” (Channel)
+    Channel<Token> m_channel; 
+    Tokenizer* m_tokenizer; // 它需要知道数据源来启动生产者
+
+public:
+    Parser(Tokenizer* p_tokenizer, size_t capacity = 128)
+        : m_tokenizer(p_tokenizer), m_channel(capacity) {}
+
+    Ref parse() { /* ... 启动并协同线程 ... */ }
+
+private:
+    // 内部的 peek/consume 现在直接与传送带交互
+    Token peek() { return m_channel.peek(); }
+    void consume() { m_channel.pop(); }
+
+    // 核心解析逻辑
+    Element* parse_value() { /* ... */ }
+};
+```
+
+#### 设计细节剖析：
+
+1.  **状态的内聚**：<br>
+`Parser` 对象现在封装了并发解析所需的**全部状态**：`m_tokenizer` (数据源) 和 `m_channel` (线程间通信媒介)。<br>
+这使得并发的复杂性被控制在 `Parser` 内部，对外部调用者透明。
+
+2.  **数据源的切换**：<br>
+`Parser` 内部的 `peek()` 和 `consume()` 方法，现在的数据源从 `m_tokenizer` **无缝切换** 到了 `m_channel`。<br>
+这是至关重要的一步，它意味着 `Parser` 的核心解析逻辑，现在开始消费一个来自 **另一个线程** 的、异步的数据流。
+
+### 8.4 `parse()` 方法：启动并协同两个线程
+
+`Parser` 的 `parse()` 成员函数是整个并发大戏的“开场导演”。
+
+它负责创建生产者线程，并让自己（主线程）成为消费者，然后确保两者能正确地协同工作直到结束。
+
+```cpp
+// 在 Parser 类中
+Ref parse() 
+{
+    // 第一幕：创建并启动生产者线程
+    std::thread producer_thread(
+        [&]() 
+        {
+        while (true) 
+        {
+            const Token& token = m_tokenizer->peek();
+            m_channel.push(token); // 生产一个 Token，放入传送带
+
+            if (token.type == TokenType::End) break;
+            
+            m_tokenizer->consume(); // 生产者推进自己的状态
+        }
+    });
+
+    // 第二幕：主线程作为消费者，开始解析工作
+    Ref root = Ref(parse_value());
+
+    // 最终幕：等待生产者线程结束
+    producer_thread.join();
+
+    return root;
+}
+```
+
+#### 设计细节与正确性剖析：
+
+1. **职责的严格分离 (至关重要!)**：<br>
+这是并发正确的基石。<br>
+生产者 (`producer_thread`) 只与 `m_tokenizer` 和 `m_channel.push` 交互。<br>
+消费者 (`Parser` 主线程) 只与 `m_channel` 的 `peek/pop` 交互。<br>
+两者各司其职，互不干涉对方的状态推进逻辑。
+
+2. **`End` Token：流水线的“关机信号”**：<br>
+生产者必须将 `End` Token 也推入 `Channel`。<br>
+这是它告诉 `Parser` “所有货物都已送达，准备关机”的唯一信号。
+
+3. **`thread.join()`：确保善始善终**：<br>
+在 `parse()` 函数的末尾调用 `producer_thread.join()` 是必须的。<br>
+它会阻塞主线程（消费者），直到生产者线程完全执行完毕。<br>
+这可以防止 `parse()` 函数提前返回，导致 `Parser` 对象（及其成员 `m_channel` 和 `m_tokenizer`）被销毁，而此时生产者线程可能还在访问它们，从而引发程序崩溃。
+
+4. 接口的优雅不变性：<br>
+这次惊心动魄的并发改造，最令人赞叹的一点是什么？是我们几乎没有修改 `parse_value()`、`parse_object()`、`parse_array()` 这些核心解析函数的内部逻辑！<br>
+因为我们之前将它们构建于 `peek()/consume()` 这个抽象接口之上，现在我们只是改变了 `peek()/consume()` 的底层实现（从直接访问 `Tokenizer` 变为访问 `Channel`），而上层的语法解析逻辑因为与数据源解耦，得以保持稳定。<br>
+这是优秀架构设计的力量的完美体现。
+
+### 总结
+
+我们成功了！通过引入一个线程安全的 `Channel`，我们将 `Parser` 重构为了一个真正的并发协调器。
+
+这次改造不仅仅是为了追求极致的性能，它更是一次深刻的软件架构实践，教会了我们：
+
+- 如何将一个复杂的单线程流程，分解为可并行执行的、职责单一的单元。
+- 如何通过线程安全的队列，在不同执行单元之间建立可靠的通信。
+- 如何设计具有前瞻性的接口 (`peek/consume`)，使得系统在面对重大的底层变更（从同步到异步）时，核心逻辑依然能保持稳定。
+
+我们的 JSON 王国，现在不仅宏伟、高效，更拥有了处理未来海量数据的、可扩展的并行处理能力。然而，在追求极致性能的道路上，这只是第一步。
+
+## 九、为并发引擎减负 - 从阻塞到飞跃 (无锁队列)
+
+我们的并发流水线已经能正确运转了。但如果你进行性能测试，可能会惊讶地发现：**它甚至比单线程版本还要慢！**
+
+问题出在哪里？答案是：我们的“传送带” (`Channel`) 虽然安全，但太“重”了。
+
+### 9.1 性能诊断：昂贵的“安保系统”
+
+`Channel` 内部的 `std::mutex` 和 `std::condition_variable` 就像一个极其负责但手续繁琐的“安保系统”。
+
+`Tokenizer` 每生产一个小小的 `Token`，就要经历一次“加锁 -> 等待 -> 推送 -> 解锁 -> 通知”的完整流程。<br>
+当 `Token` 的生产和消费速度非常快时，线程的大部分时间都耗费在了等待锁、线程上下文切换和内核交互上，而不是实际的解析工作。
+
+对于 **单生产者-单消费者 (SPSC)** 这个特定场景（这正是我们的场景！），我们可以使用一种终极武器来彻底抛弃这个笨重的安保系统——**无锁环形缓冲区 (Lock-Free Ring Buffer)**。
+
+### 9.2 终极武器：`LockFreeRingBuffer`
+
+无锁队列是并发编程的圣杯之一。
+
+它不使用任何锁，只通过 CPU 保证的原子操作 (atomic operations) 来同步线程。这意味着线程之间几乎没有阻塞和等待，数据传递的延迟可以达到纳秒级别。
+
+```cpp
+// lock_free_ring_buffer
+template <typename T>
+class LockFreeRingBuffer
+{
+private:
+    size_t m_capacity;
+    std::vector<T> m_buffer;
+    // **关键：头尾指针都是原子变量**
+    std::atomic<size_t> m_head{0};
+    std::atomic<size_t> m_tail{0};
+
+public:
+    LockFreeRingBuffer(size_t p_capacity = 256) 
+        : m_capacity(p_capacity), m_buffer(p_capacity) {}
+
+    // 生产者只操作 tail
+    bool push(const T& p_item)
+    {
+        size_t tail = m_tail.load(std::memory_order_relaxed);
+        size_t next_tail = (tail + 1) % m_capacity;
+        // 如果尾指针追上了头指针，说明队列满了
+        if (next_tail == m_head.load(std::memory_order_acquire))
+            return false; // 非阻塞，立即返回失败
+        m_buffer[tail] = p_item;
+        // 魔法：通过 release 语义，确保写入的数据对消费者可见
+        m_tail.store(next_tail, std::memory_order_release);
+        return true;
+    }
+
+    // 消费者只操作 head
+    bool pop() { /* ... 通过原子操作移动 head ... */ }
+    std::optional<T> peek() { /* ... 通过原子操作读取 head 位置的数据 ... */ }
+};
+```
+
+#### 设计细节剖析：
+
+-   **无锁 (Lock-Free)**：<br>
+整个过程中没有任何 `mutex`。<br>
+线程之间通过 `std::atomic` 变量直接在硬件层面进行同步，避免了昂贵的操作系统内核调用。
+
+-   **内存序 (Memory Ordering)**：<br>
+`acquire` 和 `release` 是这里的核心魔法。<br>
+它是一种内存屏障，精确地告诉 CPU 如何同步不同核心之间的缓存，确保生产者写入的数据能被消费者正确地、不乱序地看到。
+
+-   **非阻塞与忙等**：<br>
+无锁队列的 `push` 和 `pop` 通常是 **非阻塞** 的。<br>
+如果队列满了或空了，它们会立即返回失败。<br>
+这意味着使用者需要在一个循环中“忙等” (Busy-Waiting)，不断尝试操作直到成功。
+
+#### 9.3 最后的改造：为 `Parser` 换上“F1 引擎”
+
+现在，我们将 `Parser` 内部的“传送带”从 `Channel` 替换为 `LockFreeRingBuffer`。
+
+```cpp
+// parser.hpp (Parser 的最终形态)
+class Parser 
+{
+private:
+    // **传送带升级！**
+    LockFreeRingBuffer<Token> m_buffer; 
+    Tokenizer* m_tokenizer;
+
+public:
+    Parser(Tokenizer* p_tokenizer, size_t capacity = 256)
+        : m_tokenizer(p_tokenizer), m_buffer(capacity) {}
+
+    Ref parse() {
+        std::thread producer_thread([&]()
+        {
+            while (true) {
+                Token token = m_tokenizer->peek();
+                // 关键修正1：处理非阻塞 push
+                // 如果 push 失败，就循环等待，直到成功
+                while (!m_buffer.push(token)) std::this_thread::yield(); // 让出时间片
+                if (token.type == TokenType::End) break;
+                m_tokenizer->consume();
+            }
+        });
+
+        Ref root = Ref(this->parse_value());
+        producer_thread.join();
+        return root;
+    }
+private:
+    // 关键修正2：处理非阻塞 peek 和 pop
+    Token peek()
+    {
+        std::optional<Token> token;
+        // 如果 peek 失败 (缓冲区为空)，就循环等待
+        while (!(token = m_buffer.peek()).has_value()) std::this_thread::yield(); // 让出时间片
+        return token.value();
+    }
+    void consume() 
+    {
+        // 如果 pop 失败 (缓冲区为空)，就循环等待
+        while (!m_buffer.pop()) std::this_thread::yield(); 
+    }
+    // ... 核心解析逻辑 parse_value 等完全不变！
+};
+```
+
+#### 设计细节剖析：
+
+1. **处理非阻塞**：<br>
+从阻塞队列切换到非阻塞队列，最大的改变就是我们需要在调用点手动处理操作失败的情况。<br>
+通过 `while` 循环和 `yield` (或更高效的 `sleep_for`)，我们实现了一种“自旋等待”，在不引入锁的情况下实现了线程同步。
+
+2. **接口的胜利**：<br>
+再次强调，由于我们核心的 `parse_value`, `parse_object`, `parse_array` 函数只依赖于 `peek()` 和 `consume()` 这两个我们自己定义的接口，<br>
+这次从有锁到无锁的巨大底层变更，依然没有对它们产生任何冲击。这就是抽象的力量！
+
+### 总结
+
+我们完整地走过了一条从单线程到并发，再到高性能并发的演进之路。
+
+这次旅程不仅仅是代码的升级，更是设计思想的升华：
+
+1. **并发初探**：通过有锁的 **Channel**，我们成功地搭建了生产者-消费者模型，理解了线程同步、互斥锁和条件变量的基本原理。
+
+2. **性能瓶颈**：我们亲身体会到，不恰当的并发控制（过多的锁竞争）反而会降低性能，并学会了定位瓶颈。
+
+3. **终极形态**：通过引入无锁队列，我们掌握了在特定场景下（SPSC）实现极致性能的尖端技术，并理解了原子操作和内存序等底层概念。
+
+你的 JSON 库现在已经脱胎换骨，它不仅功能完备、架构优美，更拥有了一颗真正为现代多核处理器而生的、风驰电掣的“F1 引擎”。
+
+## 十、总结与展望
 
 恭喜你！我们从零开始，完整地经历了一个 JSON 解析器的诞生全过程：
 
@@ -1049,7 +1569,7 @@ delete root.get();
 
 - 性能优化：`parse_number` 和 `parse_string` 等函数可以通过更底层的算法进行优化，避免过多的字符串拷贝。
 
-- 功能扩展：增加一个“格式化输出”或“Pretty Print”功能，让 `serialize()` 的输出更具可读性。
+- 并行化算法：`tokenizer`、`Parser` 和 `InputStream` 之间的逻辑分离，可以放在不同的线程里并行加速。
 
 希望这次从零到一的旅程，能点燃你对项目开发的激情，并为你未来的编程之路打下坚实的基础。去创造吧！
 
