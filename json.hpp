@@ -17,6 +17,8 @@
 #include <atomic>
 #include <optional>
 #include <chrono>
+#include <string_view>
+#include <charconv>
 
 namespace pjh_std
 {
@@ -31,19 +33,35 @@ namespace pjh_std
         class Array;
 
         using string_t = std::string;
+        using string_v_t = std::string_view;
 
         using value_t = std::variant<
             std::nullptr_t,
             bool,
             int,
             float,
-            string_t>;
+            string_t,
+            string_v_t>;
 
         template <typename T>
         using array_t = std::vector<T>;
 
+        struct StringViewHash
+        {
+            using is_transparent = void; // 关键！启用透明模式
+
+            size_t operator()(std::string_view sv) const
+            {
+                return std::hash<std::string_view>{}(sv);
+            }
+        };
+
         template <typename T>
-        using object_t = std::unordered_map<string_t, T>;
+        using object_t = std::unordered_map<
+            string_v_t,
+            T,
+            StringViewHash,
+            std::equal_to<>>;
 
         // Exceptions
         class Exception;
@@ -180,7 +198,7 @@ namespace pjh_std
             }
         };
 
-        template <typename T, size_t BlockSize = 1024>
+        template <typename T, size_t BlockSize = 4096>
         class BlockAllocator
         {
             std::vector<void *> blocks;
@@ -373,8 +391,11 @@ namespace pjh_std
             Value(bool p_value) : m_value(p_value) {}
             Value(int p_value) : m_value(p_value) {}
             Value(float p_value) : m_value(p_value) {}
+
+            Value(const char *p_value) : m_value(string_t(p_value)) {}
             Value(const string_t &p_value) : m_value(p_value) {}
-            Value(char *p_value) : Value((string_t)p_value) {}
+            Value(string_t &&p_value) : m_value(std::move(p_value)) {}
+            Value(std::string_view p_value) : m_value(p_value) {}
 
             Value(const Value &other) : m_value(other.m_value) {}
             Value(const Value *other) : m_value(other->m_value) {}
@@ -445,7 +466,7 @@ namespace pjh_std
             bool is_bool() const noexcept { return is_T<bool>(); }
             bool is_int() const noexcept { return is_T<int>(); }
             bool is_float() const noexcept { return is_T<float>(); }
-            bool is_str() const noexcept { return is_T<std::string>(); }
+            bool is_str() const noexcept { return is_T<string_t>() || is_T<string_v_t>(); }
 
         private:
             template <typename T>
@@ -482,8 +503,10 @@ namespace pjh_std
 
             string_t as_str() const
             {
-                if (is_str())
+                if (is_T<string_t>())
                     return as_T<string_t>();
+                else if (is_T<string_v_t>())
+                    return string_t(as_T<string_v_t>());
                 else
                     throw TypeException("Not string type!");
             }
@@ -812,8 +835,8 @@ namespace pjh_std
                 return m_obj.size() == other.m_obj.size() &&
                        std::equal(m_obj.begin(), m_obj.end(), other.m_obj.begin(),
                                   [](
-                                      const std::pair<string_t, Element *> &a,
-                                      const std::pair<string_t, Element *> b)
+                                      const std::pair<string_v_t, Element *> &a,
+                                      const std::pair<string_v_t, Element *> b)
                                   { return a.second && b.second && *(a.second) == *(b.second); });
             }
 
@@ -831,22 +854,22 @@ namespace pjh_std
         public:
             size_t size() const noexcept { return m_obj.size(); }
             bool empty() const noexcept { return m_obj.empty(); }
-            bool contains(const string_t &p_key) const noexcept { return m_obj.find(p_key) != m_obj.end(); }
+            bool contains(string_v_t p_key) const noexcept { return m_obj.find(p_key) != m_obj.end(); }
 
         public:
-            Element *operator[](const string_t &p_key)
+            Element *operator[](string_v_t p_key)
             {
                 auto it = m_obj.find(p_key);
                 return (it != m_obj.end()) ? it->second : nullptr;
             }
 
-            const Element *operator[](const string_t &p_key) const
+            const Element *operator[](string_v_t p_key) const
             {
                 auto it = m_obj.find(p_key);
                 return (it != m_obj.end()) ? it->second : nullptr;
             }
 
-            Element *get(const string_t &p_key)
+            Element *get(string_v_t p_key)
             {
                 auto ret = operator[](p_key);
                 if (ret != nullptr)
@@ -855,7 +878,7 @@ namespace pjh_std
                     throw InvalidKeyException("invalid key!");
             }
 
-            const Element *get(const string_t &p_key) const
+            const Element *get(string_v_t p_key) const
             {
                 auto ret = operator[](p_key);
                 if (ret != nullptr)
@@ -865,7 +888,7 @@ namespace pjh_std
             }
 
         public:
-            void insert_raw_ptr(const string_t &p_key, Element *child)
+            void insert_raw_ptr(const string_v_t &p_key, Element *child)
             {
                 auto it = m_obj.find(p_key);
                 if (it != m_obj.end())
@@ -878,7 +901,7 @@ namespace pjh_std
                     insert_raw_ptr(child.first, child.second);
             }
 
-            void copy_and_insert(const string_t &property, const Element &child) { insert_raw_ptr(property, child.copy()); }
+            void copy_and_insert(const string_v_t &property, const Element &child) { insert_raw_ptr(property, child.copy()); }
             void copy_and_insert_all(const object_t<Element *> &other) noexcept
             {
                 for (const auto &child : other)
@@ -906,11 +929,11 @@ namespace pjh_std
         public:
             Ref(Element *p_ptr = nullptr) : m_ptr(p_ptr) {}
 
-            Ref operator[](const string_t &p_key)
+            Ref operator[](string_v_t p_key)
             {
                 if (!m_ptr)
                     throw NullPointerException("Null reference");
-                if (auto obj = dynamic_cast<Object *>(m_ptr))
+                if (auto obj = m_ptr->as_object())
                     return Ref(obj->get(p_key));
                 throw TypeException("Not an object");
             }
@@ -1051,36 +1074,15 @@ namespace pjh_std
         struct Token
         {
             TokenType type;
-            std::string value;
-        };
-
-        class InputStream
-        {
-        private:
-            std::string str;
-            const size_t begin, end;
-            size_t current;
-
-        public:
-            InputStream(const std::string &str) : str(str), begin(0), current(0), end(str.size()) {}
-            InputStream(const std::string &str, const size_t &begin, const size_t &end) : str(str), begin(begin), current(begin), end(end) {}
-            InputStream(const InputStream &other) = default;
-            InputStream(const InputStream &other, const size_t &begin, const size_t &end) : str(other.str), begin(begin), current(begin), end(end) {}
-            ~InputStream() = default;
-
-        public:
-            char get() { return str[current++]; }
-            char get(char &ch) { return ch = get(); }
-            char peek() { return str[current]; }
-            char forward() { return str[current + 1]; }
-            bool eof() const noexcept { return current >= end; }
+            std::string_view value;
         };
 
         class Tokenizer
         {
         private:
-            InputStream stream;
-            char current_ch;
+            std::string m_str;
+            size_t m_pos;
+
             size_t line;
             size_t column;
 
@@ -1088,7 +1090,9 @@ namespace pjh_std
 
         public:
             // Constructor
-            Tokenizer(const InputStream &stream) : stream(stream), line(1), column(1) { consume(); }
+            Tokenizer(const std::string &p_str)
+                : m_str(p_str), m_pos(0),
+                  line(1), column(1) { consume(); }
             Tokenizer(const Tokenizer &other) = default;
             ~Tokenizer() = default;
 
@@ -1098,31 +1102,39 @@ namespace pjh_std
             void consume() { m_current_token = read_next_token(); }
 
         private:
+            bool eof() const noexcept { return m_pos >= m_str.size(); }
+            char peek_char() const { return m_str[m_pos]; }
+            char get_char() { return column++, m_str[m_pos++]; }
+
             Token read_next_token()
             {
                 skip_white_space();
-                if (stream.eof())
-                {
+                if (eof())
                     return {TokenType::End, ""};
-                }
 
-                current_ch = stream.get();
-                column++;
+                const size_t start_pos = m_pos;
+                char current_ch = peek_char();
 
                 switch (current_ch)
                 {
                 case '{':
-                    return {TokenType::ObjectBegin, "{"};
+                    get_char();
+                    return {TokenType::ObjectBegin, std::string_view(m_str.data() + start_pos, 1)};
                 case '}':
-                    return {TokenType::ObjectEnd, "}"};
+                    get_char();
+                    return {TokenType::ObjectEnd, std::string_view(m_str.data() + start_pos, 1)};
                 case '[':
-                    return {TokenType::ArrayBegin, "["};
+                    get_char();
+                    return {TokenType::ArrayBegin, std::string_view(m_str.data() + start_pos, 1)};
                 case ']':
-                    return {TokenType::ArrayEnd, "]"};
+                    get_char();
+                    return {TokenType::ArrayEnd, std::string_view(m_str.data() + start_pos, 1)};
                 case ':':
-                    return {TokenType::Colon, ":"};
+                    get_char();
+                    return {TokenType::Colon, std::string_view(m_str.data() + start_pos, 1)};
                 case ',':
-                    return {TokenType::Comma, ","};
+                    get_char();
+                    return {TokenType::Comma, std::string_view(m_str.data() + start_pos, 1)};
                 case '"':
                     return parse_string();
                 case 't':
@@ -1143,11 +1155,9 @@ namespace pjh_std
             // Skip white space. May have a faster way?
             inline void skip_white_space()
             {
-                while (!stream.eof() && (stream.peek() == '\n' || stream.peek() == '\t' || stream.peek() == ' '))
+                while (!eof() && (peek_char() == '\n' || peek_char() == '\t' || peek_char() == ' '))
                 {
-                    current_ch = stream.get();
-                    column++;
-                    if (current_ch == '\n')
+                    if (get_char() == '\n')
                         line++, column = 1;
                 }
             }
@@ -1155,124 +1165,157 @@ namespace pjh_std
             // Parse Number Token
             Token parse_number()
             {
-                std::string _str;
+                const size_t start_pos = m_pos;
                 bool is_float = false;
 
-                _str.push_back(current_ch);
-                while (isdigit(stream.forward()) || stream.forward() == '.' || stream.forward() == '-')
+                if (!eof() && peek_char() == '-')
+                    get_char();
+
+                while (!eof() && isdigit(peek_char()))
+                    get_char();
+
+                if (!eof() && peek_char() == '.')
                 {
-                    stream.get(current_ch);
-                    is_float = is_float || current_ch == '.';
-                    _str.push_back(current_ch);
+                    is_float = true;
+                    get_char();
 
-                    column++;
+                    while (!eof() && isdigit(peek_char()))
+                        get_char();
                 }
-                if (isdigit(stream.peek()))
-                    _str.push_back(stream.get());
 
-                return {is_float ? TokenType::Float : TokenType::Integer, _str};
+                return {
+                    is_float ? TokenType::Float : TokenType::Integer,
+                    std::string_view(m_str.data() + start_pos, m_pos - start_pos)};
             }
 
-            // Parse Boolean Token, not be much faster after optimization, so I keep it.
             Token parse_bool()
             {
-                if (current_ch == 't')
+                using namespace std::literals::string_view_literals;
+
+                const size_t start_pos = m_pos;
+                if (m_str.size() - start_pos >= 4 && std::string_view(m_str.data() + start_pos, 4) == "true"sv)
                 {
-                    expect('r'), expect('u'), expect('e');
-                    return {TokenType::Bool, "true"};
+                    m_pos += 4;
+                    column += 4;
+                    return {TokenType::Bool, std::string_view(m_str.data() + start_pos, 4)};
                 }
-                else
+                if (m_str.size() - start_pos >= 5 && std::string_view(m_str.data() + start_pos, 5) == "false"sv)
                 {
-                    expect('a'), expect('l'), expect('s'), expect('e');
-                    return {TokenType::Bool, "false"};
+                    m_pos += 5;
+                    column += 5;
+                    return {TokenType::Bool, std::string_view(m_str.data() + start_pos, 5)};
                 }
+                throw ParseException(line, column, "Invalid boolean literal");
             }
 
             Token parse_string()
             {
-                std::string _str;
-                while (stream.get(current_ch))
+                get_char(); // 消费开头的引号 "
+                const size_t start_pos_content = m_pos;
+                while (!eof())
                 {
-                    column++;
-                    if (current_ch == '"')
-                        break;
-                    if (current_ch == '\\')
-                        stream.get(current_ch);
-                    _str.push_back(current_ch);
+                    char ch = peek_char(); // 只查看，不消费
+                    if (ch == '\\')
+                    {
+                        get_char(); // 消费 '\'
+                        if (!eof())
+                            get_char(); // 消费被转义的字符
+                    }
+                    else if (ch == '"') // 字符串结束
+                    {
+                        size_t end_pos_content = m_pos;
+                        get_char(); // 消费结尾的引号 "
+                        return {TokenType::String, std::string_view(m_str.data() + start_pos_content, end_pos_content - start_pos_content)};
+                    }
+                    else
+                        get_char(); // 消费普通字符
                 }
-                return {TokenType::String, _str};
+                throw ParseException(line, column, "Unterminated string literal");
             }
 
             Token parse_null()
             {
-                expect('u'), expect('l'), expect('l');
-                return {TokenType::Null, "null"};
-            }
+                using namespace std::literals::string_view_literals;
 
-            void expect(char nextChar)
-            {
-                if ((current_ch = stream.get()) != nextChar)
-                    throw ParseException(line, column, (std::string) "Unexpected character '" + std::string(1, current_ch) + "'");
-                column++;
+                const size_t start_pos = m_pos;
+                if (m_str.size() - start_pos >= 4 && std::string_view(m_str.data() + start_pos, 4) == "null"sv)
+                {
+                    m_pos += 4;
+                    column += 4;
+                    // 使用清晰的 start_pos
+                    return {TokenType::Null, std::string_view(m_str.data() + start_pos, 4)};
+                }
+                throw ParseException(line, column, "Invalid null literal");
             }
         };
 
         class Parser
         {
         private:
-            LockFreeRingBuffer<Token> m_buffer;
-            Tokenizer *m_tokenizer;
+            // LockFreeRingBuffer<Token> m_buffer;
+            Tokenizer m_tokenizer;
 
         public:
-            Parser(Tokenizer *p_tokenizer, size_t capacity = 8192)
-                : m_tokenizer(p_tokenizer), m_buffer(capacity) {}
+            Parser(const std::string &p_str, size_t capacity = 16384)
+                : m_tokenizer(p_str) /*, m_buffer(capacity)*/ {}
 
-            Ref parse()
-            {
-                std::thread producer_thread(
-                    [&]()
-                    {
-                        try
-                        {
-                            while (true)
-                            {
-                                Token token = m_tokenizer->peek();
-                                if (token.type == TokenType::End)
-                                    break;
-                                while (!m_buffer.push(token))
-                                {
-                                    std::this_thread::sleep_for(std::chrono::microseconds(10));
-                                }
-                                m_tokenizer->consume();
-                            }
-                        }
-                        catch (const std::exception &e)
-                        {
-                            throw ThreadException(e.what());
-                        }
-                    });
+            Parser(Tokenizer &p_tokenizer, size_t capacity)
+                : m_tokenizer(p_tokenizer) /*, m_buffer(capacity)*/ {}
 
-                Ref root = Ref(Parser::parse_value());
-                producer_thread.join();
-                return root;
-            }
+            Ref parse() { return Ref(parse_value()); }
+
+            // Ref parse()
+            // {
+            //     std::thread producer_thread(
+            //         [&]()
+            //         {
+            //             try
+            //             {
+            //                 while (true)
+            //                 {
+            //                     Token token = m_tokenizer.peek();
+            //                     if (token.type == TokenType::End)
+            //                         break;
+            //                     while (!m_buffer.push(token))
+            //                     {
+            //                         std::this_thread::sleep_for(std::chrono::microseconds(10));
+            //                         // std::cout << "full!" << std::endl;
+            //                     }
+            //                     m_tokenizer.consume();
+            //                 }
+            //             }
+            //             catch (const std::exception &e)
+            //             {
+            //                 // std::cout << e.what() << std::endl;
+            //                 throw ThreadException(e.what());
+            //             }
+            //         });
+
+            //     Ref root = Ref(parse_value());
+            //     producer_thread.join();
+            //     return root;
+            // }
 
         private:
             Token peek()
             {
-                std::optional<Token> token;
-                while (!(token = m_buffer.peek()).has_value())
-                {
-                    std::this_thread::sleep_for(std::chrono::microseconds(10));
-                }
-                return token.value();
+                // std::optional<Token> token;
+                // while (!(token = m_buffer.peek()).has_value())
+                // {
+                //     std::this_thread::sleep_for(std::chrono::microseconds(10));
+                //     std::cout << "empty!" << std::endl;
+                // }
+                // return token.value();
+                return m_tokenizer.peek();
             }
             void consume()
             {
-                while (!m_buffer.pop())
-                {
-                    std::this_thread::sleep_for(std::chrono::microseconds(10));
-                }
+                // while (!m_buffer.pop())
+                // {
+                //     std::this_thread::sleep_for(std::chrono::microseconds(10));
+                //     std::cout << "empty!" << std::endl;
+                // }
+                m_tokenizer.consume();
             }
 
             Element *parse_value()
@@ -1287,21 +1330,29 @@ namespace pjh_std
                     return Parser::parse_array();
                 case TokenType::Integer:
                 {
-                    int val = std::atoi(token.value.c_str());
+                    int val;
+                    auto [ptr, ec] = std::from_chars(token.value.data(), token.value.data() + token.value.size(), val);
+                    if (ec != std::errc())
+                    {
+                        throw Exception("Invalid integer: " + std::string(token.value));
+                    }
                     consume();
                     return new Value(val);
                 }
                 case TokenType::Float:
                 {
+                    // 对于 float，from_chars 的支持可能不完善，一个安全的方式是构造一个临时string
                     try
                     {
-                        float val = (float)std::stod(token.value);
+                        // stod 需要一个 owning 的 string
+                        std::string temp_str(token.value);
+                        float val = std::stof(temp_str);
                         consume();
                         return new Value(val);
                     }
                     catch (...)
                     {
-                        throw Exception("Invalid float: " + token.value);
+                        throw Exception("Invalid float: " + std::string(token.value));
                     }
                 }
                 case TokenType::Bool:
@@ -1312,7 +1363,7 @@ namespace pjh_std
                 }
                 case TokenType::String:
                 {
-                    string_t val = token.value;
+                    auto val = token.value;
                     consume();
                     return new Value(val);
                 }
@@ -1342,7 +1393,7 @@ namespace pjh_std
 
                     if (key_token.type != TokenType::String)
                         throw Exception("Expected string key in object!");
-                    std::string key = key_token.value;
+                    auto key = key_token.value;
                     consume();
 
                     if (peek().type != TokenType::Colon)

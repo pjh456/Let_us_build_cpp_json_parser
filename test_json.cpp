@@ -51,6 +51,7 @@ void test_value()
     assert(v_bool.as_bool() == true);
     assert(v_int.as_int() == 42);
     assert(v_float.as_float() == 3.14f);
+    std::cout << v_str.as_str();
     assert(v_str.as_str() == "hello");
 }
 
@@ -104,9 +105,7 @@ void test_parser()
         }
     })";
 
-    InputStream stream(json_text);
-    Tokenizer tokenizer(stream);
-    Parser parser(&tokenizer);
+    Parser parser(json_text);
     Ref root = parser.parse();
 
     assert(root["name"].as_str() == "Bob");
@@ -175,9 +174,7 @@ void test_file_io()
 
     std::string content = oss.str();
 
-    InputStream stream(content);
-    Tokenizer tokenizer(stream);
-    Parser parser(&tokenizer);
+    Parser parser(content);
     Ref root = parser.parse();
 
     // std::cout << root;
