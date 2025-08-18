@@ -10,6 +10,8 @@ namespace pjh_std
 {
     namespace json
     {
+
+        // 定义 JSON 解析过程中的各种词法单元（Token）类型
         enum class TokenType
         {
             ObjectBegin, // '{'
@@ -26,91 +28,91 @@ namespace pjh_std
             End          // End of input
         };
 
+        // 定义 Token 结构体，用于存储词法单元的类型和对应的值
         struct Token
         {
             TokenType type;
-            std::string value;
+            std::string_view value;
         };
 
-        class InputStream
-        {
-        private:
-            std::string str;
-            const size_t begin, end;
-            size_t current;
-
-        public:
-            InputStream(const std::string &str) : str(str), begin(0), current(0), end(str.size()) {}
-            InputStream(const std::string &str, const size_t &begin, const size_t &end) : str(str), begin(begin), current(begin), end(end) {}
-            InputStream(const InputStream &other) = default;
-            InputStream(const InputStream &other, const size_t &begin, const size_t &end) : str(other.str), begin(begin), current(begin), end(end) {}
-            ~InputStream() = default;
-
-        public:
-            char get() { return str[current++]; }
-            char get(char &ch) { return ch = get(); }
-            char peek() { return str[current]; }
-            char forward() { return str[current + 1]; }
-            bool eof() const noexcept { return current >= end; }
-        };
-
+        /**
+         * @class Tokenizer
+         * @brief 词法分析器，负责将输入的 JSON 字符串分解成一系列的 Token。
+         */
         class Tokenizer
         {
         private:
-            InputStream stream;
-            char current_ch;
-            size_t line;
-            size_t column;
+            std::string m_str; // 要解析的原始字符串
+            size_t m_pos;      // 当前解析位置
 
-            Token m_current_token;
+            size_t line;   // 当前行号
+            size_t column; // 当前列号
+
+            Token m_current_token; // 当前已解析出的 Token
 
         public:
-            // Constructor
-            Tokenizer(const InputStream &stream) : stream(stream), line(1), column(1) { consume(); }
+            /// @brief 构造函数。@param p_str 要解析的 JSON 字符串。
+            Tokenizer(const std::string &p_str)
+                : m_str(p_str), m_pos(0),
+                  line(1), column(1) { consume(); } // 初始化时即读取第一个 token
             Tokenizer(const Tokenizer &other) = default;
             ~Tokenizer() = default;
 
-            // Token Getter
+            /// @brief 查看当前的 Token，但不移动解析位置。
             const Token peek() const noexcept { return m_current_token; }
-
+            /// @brief 消费当前的 Token，并读取下一个 Token。
             void consume() { m_current_token = read_next_token(); }
 
         private:
+            /// @brief 检查是否已到达字符串末尾。
+            bool eof() const noexcept { return m_pos >= m_str.size(); }
+            /// @brief 查看当前位置的字符，但不移动位置。
+            char peek_char() const { return m_str[m_pos]; }
+            /// @brief 获取当前位置的字符，并移动位置。
+            char get_char() { return column++, m_str[m_pos++]; }
+
+            /// @brief 读取并返回下一个有效的 Token。
             Token read_next_token()
             {
+                // 1. 跳过所有空白字符
                 skip_white_space();
-                if (stream.eof())
-                {
-                    return {TokenType::End, ""};
-                }
+                if (eof())
+                    return {TokenType::End, ""}; // 如果已到末尾，返回 End Token
 
-                current_ch = stream.get();
-                column++;
+                const size_t start_pos = m_pos;
+                char current_ch = peek_char();
 
+                // 2. 根据当前字符判断 Token 类型
                 switch (current_ch)
                 {
                 case '{':
-                    return {TokenType::ObjectBegin, "{"};
+                    get_char();
+                    return {TokenType::ObjectBegin, std::string_view(m_str.data() + start_pos, 1)};
                 case '}':
-                    return {TokenType::ObjectEnd, "}"};
+                    get_char();
+                    return {TokenType::ObjectEnd, std::string_view(m_str.data() + start_pos, 1)};
                 case '[':
-                    return {TokenType::ArrayBegin, "["};
+                    get_char();
+                    return {TokenType::ArrayBegin, std::string_view(m_str.data() + start_pos, 1)};
                 case ']':
-                    return {TokenType::ArrayEnd, "]"};
+                    get_char();
+                    return {TokenType::ArrayEnd, std::string_view(m_str.data() + start_pos, 1)};
                 case ':':
-                    return {TokenType::Colon, ":"};
+                    get_char();
+                    return {TokenType::Colon, std::string_view(m_str.data() + start_pos, 1)};
                 case ',':
-                    return {TokenType::Comma, ","};
+                    get_char();
+                    return {TokenType::Comma, std::string_view(m_str.data() + start_pos, 1)};
                 case '"':
-                    return parse_string();
+                    return parse_string(); // 解析字符串
                 case 't':
                 case 'f':
-                    return parse_bool();
+                    return parse_bool(); // 解析布尔值
                 case 'n':
-                    return parse_null();
+                    return parse_null(); // 解析 null
                 default:
                     if (isdigit(current_ch) || current_ch == '-')
-                        return parse_number();
+                        return parse_number(); // 解析数字
                     else
                         throw ParseException(line, column, (std::string) "Unexpected character '" + std::string(1, current_ch) + "'");
                     break;
@@ -118,82 +120,118 @@ namespace pjh_std
             }
 
         private:
-            // Skip white space. May have a faster way?
+            /// @brief 跳过空白字符（空格、制表符、换行符）。
             inline void skip_white_space()
             {
-                while (!stream.eof() && (stream.peek() == '\n' || stream.peek() == '\t' || stream.peek() == ' '))
+                while (!eof() && (peek_char() == '\n' || peek_char() == '\t' || peek_char() == ' '))
                 {
-                    current_ch = stream.get();
-                    column++;
-                    if (current_ch == '\n')
+                    if (get_char() == '\n') // 如果是换行符，更新行号和列号
                         line++, column = 1;
                 }
             }
 
-            // Parse Number Token
+            /// @brief 解析数字 Token (整数或浮点数)。
             Token parse_number()
             {
-                std::string _str;
+                const size_t start_pos = m_pos;
                 bool is_float = false;
 
-                _str.push_back(current_ch);
-                while (isdigit(stream.forward()) || stream.forward() == '.' || stream.forward() == '-')
+                // 1. 处理可选的负号
+                if (!eof() && peek_char() == '-')
+                    get_char();
+
+                // 2. 读取整数部分
+                while (!eof() && isdigit(peek_char()))
+                    get_char();
+
+                // 3. 如果有小数点，则标记为浮点数并读取小数部分
+                if (!eof() && peek_char() == '.')
                 {
-                    stream.get(current_ch);
-                    is_float = is_float || current_ch == '.';
-                    _str.push_back(current_ch);
+                    is_float = true;
+                    get_char();
 
-                    column++;
+                    while (!eof() && isdigit(peek_char()))
+                        get_char();
                 }
-                if (isdigit(stream.peek()))
-                    _str.push_back(stream.get());
 
-                return {is_float ? TokenType::Float : TokenType::Integer, _str};
+                return {
+                    is_float ? TokenType::Float : TokenType::Integer,
+                    std::string_view(m_str.data() + start_pos, m_pos - start_pos)};
             }
 
-            // Parse Boolean Token, not be much faster after optimization, so I keep it.
+            /// @brief 解析布尔值 Token (true 或 false)。
             Token parse_bool()
             {
-                if (current_ch == 't')
+                using namespace std::literals::string_view_literals;
+
+                const size_t start_pos = m_pos;
+                // 1. 尝试匹配 "true"
+                if (m_str.size() - start_pos >= 4 && std::string_view(m_str.data() + start_pos, 4) == "true"sv)
                 {
-                    expect('r'), expect('u'), expect('e');
-                    return {TokenType::Bool, "true"};
+                    m_pos += 4;
+                    column += 4;
+                    return {TokenType::Bool, std::string_view(m_str.data() + start_pos, 4)};
                 }
-                else
+                // 2. 尝试匹配 "false"
+                if (m_str.size() - start_pos >= 5 && std::string_view(m_str.data() + start_pos, 5) == "false"sv)
                 {
-                    expect('a'), expect('l'), expect('s'), expect('e');
-                    return {TokenType::Bool, "false"};
+                    m_pos += 5;
+                    column += 5;
+                    return {TokenType::Bool, std::string_view(m_str.data() + start_pos, 5)};
                 }
+                // 3. 匹配失败，抛出异常
+                throw ParseException(line, column, "Invalid boolean literal");
             }
 
+            /// @brief 解析字符串 Token。
             Token parse_string()
             {
-                std::string _str;
-                while (stream.get(current_ch))
+                // 1. 消费开头的引号 "
+                get_char();
+                const size_t start_pos_content = m_pos;
+                while (!eof())
                 {
-                    column++;
-                    if (current_ch == '"')
-                        break;
-                    if (current_ch == '\\')
-                        stream.get(current_ch);
-                    _str.push_back(current_ch);
+                    char ch = peek_char();
+                    // 2. 处理转义字符
+                    if (ch == '\\')
+                    {
+                        get_char(); // 消费 '\'
+                        if (!eof())
+                            get_char(); // 消费被转义的字符
+                    }
+                    // 3. 遇到结尾的引号，字符串结束
+                    else if (ch == '"')
+                    {
+                        size_t end_pos_content = m_pos;
+                        get_char(); // 消费结尾的引号 "
+                        return {TokenType::String, std::string_view(m_str.data() + start_pos_content, end_pos_content - start_pos_content)};
+                    }
+                    // 4. 处理普通字符
+                    else
+                        get_char();
                 }
-                return {TokenType::String, _str};
+                // 5. 如果直到字符串末尾也没找到闭合引号，则抛出异常
+                throw ParseException(line, column, "Unterminated string literal");
             }
 
+            /// @brief 解析 null Token。
             Token parse_null()
             {
-                expect('u'), expect('l'), expect('l');
-                return {TokenType::Null, "null"};
-            }
+                using namespace std::literals::string_view_literals;
 
-            void expect(char nextChar)
-            {
-                if ((current_ch = stream.get()) != nextChar)
-                    throw ParseException(line, column, (std::string) "Unexpected character '" + std::string(1, current_ch) + "'");
-                column++;
+                const size_t start_pos = m_pos;
+                // 1. 尝试匹配 "null"
+                if (m_str.size() - start_pos >= 4 && std::string_view(m_str.data() + start_pos, 4) == "null"sv)
+                {
+                    m_pos += 4;
+                    column += 4;
+                    return {TokenType::Null, std::string_view(m_str.data() + start_pos, 4)};
+                }
+                // 2. 匹配失败，抛出异常
+                throw ParseException(line, column, "Invalid null literal");
             }
         };
+
     }
 }
 
