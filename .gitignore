@@ -1,7 +1,10 @@
-test_json.exe
 40mb.json
+500mb.json
 test.json
 output.etl
 output.etl.EmbeddedPdbs
 output.etl.NGENPDB
 .vscode
+build
+include/nlohhman_json
+include/rapidjson

@@ -537,21 +537,23 @@ namespace pjh_std
 
         public:
             /// @brief 默认构造函数，创建一个 null 值。
-            Value() : m_value(nullptr) {}
+            explicit Value() : m_value(nullptr) {}
             /// @brief 构造函数，创建指定类型的值。
-            Value(std::nullptr_t) : m_value(nullptr) {}
-            Value(bool p_value) : m_value(p_value) {}
-            Value(int p_value) : m_value(p_value) {}
-            Value(float p_value) : m_value(p_value) {}
+            explicit Value(std::nullptr_t) : m_value(nullptr) {}
+            explicit Value(bool p_value) : m_value(p_value) {}
+            explicit Value(int p_value) : m_value(p_value) {}
+            explicit Value(float p_value) : m_value(p_value) {}
 
-            Value(const char *p_value) : m_value(string_t(p_value)) {}
-            Value(const string_t &p_value) : m_value(p_value) {}
-            Value(string_t &&p_value) : m_value(std::move(p_value)) {}
-            Value(std::string_view p_value) : m_value(p_value) {}
+            explicit Value(const char *p_value) : m_value(string_t(p_value)) {}
+            explicit Value(const string_t &p_value) : m_value(p_value) {}
+            explicit Value(string_t &&p_value) : m_value(std::move(p_value)) {}
+            explicit Value(std::string_view p_value) : m_value(p_value) {}
 
             /// @brief 拷贝构造函数。
-            Value(const Value &other) : m_value(other.m_value) {}
-            Value(const Value *other) : m_value(other->m_value) {}
+            explicit Value(const Value &other) : m_value(other.m_value) {}
+            explicit Value(const Value *other) : m_value(other->m_value) {}
+            /// @brief 移动构造函数。
+            Value(Value &&other) noexcept : m_value(std::move(other.m_value)) { other.m_value = nullptr; }
             /// @brief 移动构造函数。
             Value(Value &&other) noexcept : m_value(std::move(other.m_value)) { other.m_value = nullptr; }
 
@@ -1579,63 +1581,63 @@ namespace pjh_std
             /// @brief 解析的入口函数，开始整个解析过程。
             Ref parse() { return Ref(parse_value()); }
 
-            /* // 多线程版本，但是性能不如单线程改回去了
-            Ref parse()
-            {
-                std::thread producer_thread(
-                    [&]()
-                    {
-                        try
-                        {
-                            while (true)
-                            {
-                                Token token = m_tokenizer.peek();
-                                if (token.type == TokenType::End)
-                                    break;
-                                while (!m_buffer.push(token))
-                                {
-                                    std::this_thread::sleep_for(std::chrono::microseconds(10));
-                                    // std::cout << "full!" << std::endl;
-                                }
-                                m_tokenizer.consume();
-                            }
-                        }
-                        catch (const std::exception &e)
-                        {
-                            // std::cout << e.what() << std::endl;
-                            throw ThreadException(e.what());
-                        }
-                    });
+            // 多线程版本，但是性能不如单线程改回去了
+            // Ref parse()
+            // {
+            //     std::thread producer_thread(
+            //         [&]()
+            //         {
+            //             try
+            //             {
+            //                 while (true)
+            //                 {
+            //                     Token token = m_tokenizer.peek();
+            //                     if (token.type == TokenType::End)
+            //                         break;
+            //                     while (!m_buffer.push(token))
+            //                     {
+            //                         std::this_thread::sleep_for(std::chrono::microseconds(10));
+            //                         // std::cout << "full!" << std::endl;
+            //                     }
+            //                     m_tokenizer.consume();
+            //                 }
+            //             }
+            //             catch (const std::exception &e)
+            //             {
+            //                 // std::cout << e.what() << std::endl;
+            //                 throw ThreadException(e.what());
+            //             }
+            //         });
 
-                Ref root = Ref(parse_value());
-                producer_thread.join();
-                return root;
-            }*/
+            //     Ref root = Ref(parse_value());
+            //     producer_thread.join();
+            //     return root;
+            // }
 
         private:
             /// @brief 查看下一个 Token。
             Token peek() { return m_tokenizer.peek(); }
             /// @brief 消费当前 Token。
             void consume() { m_tokenizer.consume(); }
-            /* 多线程版本的跨线程交互数据
-            Token peek()
-            {
-                std::optional<Token> token;
-                while (!(token = m_buffer.peek()).has_value())
-                {
-                    std::this_thread::sleep_for(std::chrono::microseconds(10));
-                    std::cout << "empty!" << std::endl;
-                }
-                return token.value();
-            }
-            void consume()
-            {
-                while (!m_buffer.pop())
-                {
-                    std::this_thread::sleep_for(std::chrono::microseconds(10));
-                    std::cout << "empty!" << std::endl;
-                }
-            }*/
+            // 多线程版本的跨线程交互数据
+            // Token peek()
+            // {
+            //     std::optional<Token> token;
+            //     while (!(token = m_buffer.peek()).has_value())
+            //     {
+            //         std::this_thread::sleep_for(std::chrono::microseconds(10));
+            //         // std::cout << "empty!" << std::endl;
+            //     }
+            //     return token.value();
+            // }
+            // void consume()
+            // {
+            //     while (!m_buffer.pop())
+            //     {
+            //         std::this_thread::sleep_for(std::chrono::microseconds(10));
+            //         // std::cout << "empty!" << std::endl;
+            //     }
+            // }
 
             /// @brief 解析一个通用的 JSON 值（可能是 object, array, string, number, bool, null）。
             /// 这是递归下降的核心分发函数。

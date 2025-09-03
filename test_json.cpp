@@ -7,7 +7,9 @@
 #include <sstream>
 
 // 引入 JSON 解析器头文件
-#include "json_parser.hpp"
+#include <pjh_json/json_parser.hpp>
+#include <nlohmann/json.hpp>
+#include "rapidjson/document.h"
 
 // 使用 JSON 命名空间，以便直接访问相关类
 using namespace pjh_std::json;
@@ -233,8 +235,6 @@ void test_factory_build()
  */
 void test_file_io()
 {
-    std::cout << "Test: Reading and parsing a large JSON file.\n";
-
     // 1. 定义文件路径
     const std::filesystem::path path("E:/Projects/blogs/let_us_build_cpp_json_parser/40mb.json");
 
@@ -260,8 +260,58 @@ void test_file_io()
 
     // 6. 释放内存
     delete root.get();
+}
 
-    std::cout << "File IO tests completed.\n";
+void test_nlohhman_json_file_io()
+{
+    // 1. 定义文件路径
+    const std::filesystem::path path("E:/Projects/blogs/let_us_build_cpp_json_parser/40mb.json");
+
+    // 2. 检查文件是否存在
+    if (!std::filesystem::exists(path))
+    {
+        std::cout << "Error: File not found at " << path << std::endl;
+        return;
+    }
+
+    // 3. 打开文件并一次性读取所有内容
+    std::ifstream ifs(path);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    std::string content = oss.str();
+
+    // 4. 解析 JSON（nlohmann）
+    nlohmann::json root = nlohmann::json::parse(content);
+
+    // 5. 可以在这里加一些访问操作验证正确性（可选）
+    // std::cout << root.size() << std::endl;
+}
+
+void test_rapidjson_file_io()
+{
+    // 1. 定义文件路径
+    const std::filesystem::path path("E:/Projects/blogs/let_us_build_cpp_json_parser/40mb.json");
+
+    // 2. 检查文件是否存在
+    if (!std::filesystem::exists(path))
+    {
+        std::cout << "Error: File not found at " << path << std::endl;
+        return;
+    }
+
+    // 3. 打开文件并一次性读取所有内容
+    std::ifstream ifs(path);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    std::string content = oss.str();
+
+    // 4. 解析 JSON（RapidJSON）
+    rapidjson::Document doc;
+    if (doc.Parse(content.c_str()).HasParseError())
+    {
+        std::cout << "Error: Failed to parse JSON with RapidJSON.\n";
+        return;
+    }
 }
 
 /**
@@ -276,6 +326,7 @@ int main()
     Func(test_parser);
     Func(test_factory_build);
     Func(test_file_io);
-
+    Func(test_nlohhman_json_file_io);
+    Func(test_rapidjson_file_io);
     return 0;
 }

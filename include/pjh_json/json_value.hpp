@@ -22,21 +22,21 @@ namespace pjh_std
 
         public:
             /// @brief 默认构造函数，创建一个 null 值。
-            Value() : m_value(nullptr) {}
+            explicit Value() : m_value(nullptr) {}
             /// @brief 构造函数，创建指定类型的值。
-            Value(std::nullptr_t) : m_value(nullptr) {}
-            Value(bool p_value) : m_value(p_value) {}
-            Value(int p_value) : m_value(p_value) {}
-            Value(float p_value) : m_value(p_value) {}
+            explicit Value(std::nullptr_t) : m_value(nullptr) {}
+            explicit Value(bool p_value) : m_value(p_value) {}
+            explicit Value(int p_value) : m_value(p_value) {}
+            explicit Value(float p_value) : m_value(p_value) {}
 
-            Value(const char *p_value) : m_value(string_t(p_value)) {}
-            Value(const string_t &p_value) : m_value(p_value) {}
-            Value(string_t &&p_value) : m_value(std::move(p_value)) {}
-            Value(std::string_view p_value) : m_value(p_value) {}
+            explicit Value(const char *p_value) : m_value(string_t(p_value)) {}
+            explicit Value(const string_t &p_value) : m_value(p_value) {}
+            explicit Value(string_t &&p_value) : m_value(std::move(p_value)) {}
+            explicit Value(std::string_view p_value) : m_value(p_value) {}
 
             /// @brief 拷贝构造函数。
-            Value(const Value &other) : m_value(other.m_value) {}
-            Value(const Value *other) : m_value(other->m_value) {}
+            explicit Value(const Value &other) : m_value(other.m_value) {}
+            explicit Value(const Value *other) : m_value(other->m_value) {}
             /// @brief 移动构造函数。
             Value(Value &&other) noexcept : m_value(std::move(other.m_value)) { other.m_value = nullptr; }
 
