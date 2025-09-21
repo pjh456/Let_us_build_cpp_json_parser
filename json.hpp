@@ -1303,7 +1303,7 @@ namespace pjh_std
          * @param p_list 键值对的初始化列表。
          * @return 包裹新创建的 Object 的 Ref 对象。
          */
-        Ref make_object(std::initializer_list<std::pair<string_t, Ref>> p_list)
+        inline Ref make_object(std::initializer_list<std::pair<string_t, Ref>> p_list)
         {
             auto obj = new Object();
             for (auto &kv : p_list)
@@ -1316,7 +1316,7 @@ namespace pjh_std
          * @param p_list 值的初始化列表。
          * @return 包裹新创建的 Array 的 Ref 对象。
          */
-        Ref make_array(std::initializer_list<Ref> p_list)
+        inline Ref make_array(std::initializer_list<Ref> p_list)
         {
             auto arr = new Array();
             for (const auto &v : p_list)
@@ -1328,12 +1328,12 @@ namespace pjh_std
          * @brief 工厂函数，用于方便地创建各种类型的 JSON Value。
          * @return 包裹新创建的 Value 的 Ref 对象。
          */
-        Ref make_value(std::nullptr_t) { return Ref(new Value(nullptr)); }
-        Ref make_value(bool p_val) { return Ref(new Value(p_val)); }
-        Ref make_value(int p_val) { return Ref(new Value(p_val)); }
-        Ref make_value(float p_val) { return Ref(new Value(p_val)); }
-        Ref make_value(const string_t p_val) { return Ref(new Value(p_val)); }
-        Ref make_value(char *p_val) { return Ref(new Value((string_t)p_val)); }
+        inline Ref make_value(std::nullptr_t) { return Ref(new Value(nullptr)); }
+        inline Ref make_value(bool p_val) { return Ref(new Value(p_val)); }
+        inline Ref make_value(int p_val) { return Ref(new Value(p_val)); }
+        inline Ref make_value(float p_val) { return Ref(new Value(p_val)); }
+        inline Ref make_value(const char *p_val) { return Ref(new Value((string_t)p_val)); }
+        inline Ref make_value(const string_t p_val) { return Ref(new Value(p_val)); }
         // json_ref.hpp
 
         // json_tokenizer.hpp

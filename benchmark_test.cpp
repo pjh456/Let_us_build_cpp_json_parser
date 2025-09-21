@@ -5,7 +5,7 @@
 #include <iostream>
 
 #include <benchmark/benchmark.h>
-#include <pjh_json/json_parser.hpp>
+#include <pjh_json/parsers/json_parser.hpp>
 #include <nlohmann/json.hpp>
 #include "rapidjson/document.h"
 
@@ -165,12 +165,15 @@ void RegisterBenchmarks()
 
         std::string json_data = read_file(path);
 
-        benchmark::RegisterBenchmark("PJH/",
-                                     BM_PJH_Json_Parse, json_data);
-        benchmark::RegisterBenchmark("Nlohmann/",
-                                     BM_Nlohmann_Json_Parse, json_data);
-        benchmark::RegisterBenchmark("RapidJSON/",
-                                     BM_Rapid_Json_Parse, json_data);
+        benchmark::RegisterBenchmark(
+            "PJH/",
+            BM_PJH_Json_Parse, json_data);
+        benchmark::RegisterBenchmark(
+            "Nlohmann/",
+            BM_Nlohmann_Json_Parse, json_data);
+        benchmark::RegisterBenchmark(
+            "RapidJSON/",
+            BM_Rapid_Json_Parse, json_data);
     }
 }
 
