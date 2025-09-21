@@ -1,15 +1,15 @@
-#ifndef INCLUDE JSON_REF
-#define INCLUDE JSON_REF
+#ifndef INCLUDE_JSON_REF
+#define INCLUDE_JSON_REF
 
 #include <initializer_list>
 #include <ostream>
 
-#include "json_definition.hpp"
-#include "json_exception.hpp"
-#include "json_element.hpp"
-#include "json_object.hpp"
-#include "json_array.hpp"
-#include "json_value.hpp"
+#include <pjh_json/helpers/json_definition.hpp>
+#include <pjh_json/helpers/json_exception.hpp>
+#include <pjh_json/datas/json_element.hpp>
+#include <pjh_json/datas/json_object.hpp>
+#include <pjh_json/datas/json_array.hpp>
+#include <pjh_json/datas/json_value.hpp>
 
 namespace pjh_std
 {
@@ -177,8 +177,8 @@ namespace pjh_std
         Ref make_value(bool p_val) { return Ref(new Value(p_val)); }
         Ref make_value(int p_val) { return Ref(new Value(p_val)); }
         Ref make_value(float p_val) { return Ref(new Value(p_val)); }
+        Ref make_value(const char *p_val) { return Ref(new Value((string_t)p_val)); }
         Ref make_value(const string_t p_val) { return Ref(new Value(p_val)); }
-        Ref make_value(char *p_val) { return Ref(new Value((string_t)p_val)); }
     }
 }
 

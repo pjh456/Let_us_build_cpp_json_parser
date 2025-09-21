@@ -933,8 +933,8 @@ namespace pjh_std
             void append(bool p_value) { append_raw_ptr(new Value(p_value)); }
             void append(int p_value) { append_raw_ptr(new Value(p_value)); }
             void append(float p_value) { append_raw_ptr(new Value(p_value)); }
+            void append(const char *p_value) { append_raw_ptr(new Value(string_t(p_value))); }
             void append(const string_t &p_value) { append_raw_ptr(new Value(p_value)); }
-            void append(char *p_value) { append_raw_ptr(new Value(p_value)); }
 
         public:
             /// @brief 删除指定索引处的元素。
@@ -1019,11 +1019,11 @@ namespace pjh_std
                 bool is_first = true;
                 for (const auto &[k, v] : m_obj)
                 {
-                    oss << '\"' << k << '\"' << ':' << v->serialize();
                     if (is_first)
                         is_first = false;
                     else
                         oss << ',';
+                    oss << '\"' << k << '\"' << ':' << v->serialize();
                 }
                 oss << '}';
                 return oss.str();
@@ -1157,8 +1157,8 @@ namespace pjh_std
             void insert(const string_t &p_key, bool p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
             void insert(const string_t &p_key, int p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
             void insert(const string_t &p_key, float p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
+            void insert(const string_t &p_key, const char *p_value) { insert_raw_ptr(p_key, new Value(string_t(p_value))); }
             void insert(const string_t &p_key, const string_t &p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
-            void insert(const string_t &p_key, char *p_value) { insert_raw_ptr(p_key, new Value(p_value)); }
 
             /// @brief 重载 new 运算符，使用对象池进行内存分配。
             void *operator new(std::size_t n) { return Object::pool.allocate(n); }

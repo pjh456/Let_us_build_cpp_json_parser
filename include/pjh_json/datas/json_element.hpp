@@ -1,8 +1,8 @@
 #ifndef INCLUDE_JSON_ELEMENT
 #define INCLUDE_JSON_ELEMENT
 
-#include "json_definition.hpp"
-#include "json_exception.hpp"
+#include <pjh_json/helpers/json_definition.hpp>
+#include <pjh_json/helpers/json_exception.hpp>
 
 namespace pjh_std
 {

@@ -4,15 +4,19 @@
 // #include <thread>
 #include <charconv>
 
-#include "channel.hpp"
-#include "object_pool.hpp"
-#include "json_element.hpp"
-#include "json_value.hpp"
-#include "json_array.hpp"
-#include "json_object.hpp"
-#include "json_ref.hpp"
-#include "json_tokenizer.hpp"
-#include "lock_free_ring_buffer.hpp"
+#include <pjh_json/datas/json_element.hpp>
+#include <pjh_json/datas/json_value.hpp>
+#include <pjh_json/datas/json_array.hpp>
+#include <pjh_json/datas/json_object.hpp>
+
+#include <pjh_json/helpers/json_ref.hpp>
+#include <pjh_json/helpers/json_ref.hpp>
+
+#include <pjh_json/parsers/json_tokenizer.hpp>
+
+#include <pjh_json/utils/channel.hpp>
+#include <pjh_json/utils/object_pool.hpp>
+#include <pjh_json/utils/lock_free_ring_buffer.hpp>
 
 namespace pjh_std
 {
@@ -145,8 +149,10 @@ namespace pjh_std
                 case TokenType::String:
                 {
                     auto val = token.value;
+                    // string_t copied_str(token.value);
                     consume();
                     return new Value(val);
+                    // return new Value(std::move(copied_str));
                 }
                 case TokenType::Null:
                     consume();

@@ -1,10 +1,12 @@
 #ifndef INCLUDE_JSON_VALUE
 #define INCLUDE_JSON_VALUE
 
-#include "json_definition.hpp"
-#include "json_exception.hpp"
-#include "json_element.hpp"
-#include "object_pool.hpp"
+#include <pjh_json/helpers/json_definition.hpp>
+#include <pjh_json/helpers/json_exception.hpp>
+
+#include <pjh_json/datas/json_element.hpp>
+
+#include <pjh_json/utils/object_pool.hpp>
 
 namespace pjh_std
 {
@@ -102,7 +104,11 @@ namespace pjh_std
         private:
             /// @brief 模板辅助函数，检查 m_value 是否持有特定类型 T。
             template <typename T>
-            bool is_T() const noexcept { return std::holds_alternative<T>(m_value); }
+            // bool is_T() const noexcept { return std::holds_alternative<T>(m_value); }
+            bool is_T() const noexcept
+            {
+                return m_value.holds_alternative<T>();
+            }
 
         public:
             /// @brief 检查是否为 null。
@@ -119,7 +125,11 @@ namespace pjh_std
         private:
             /// @brief 模板辅助函数，获取 m_value 中特定类型 T 的值。
             template <typename T>
-            T as_T() const { return std::get<T>(m_value); }
+            // T as_T() const { return std::get<T>(m_value); }
+            T as_T() const
+            {
+                return m_value.get<T>();
+            }
 
         public:
             /// @brief 获取底层的 std::variant 值。

@@ -3,8 +3,8 @@
 
 #include <string>
 
-#include "json_definition.hpp"
-#include "json_exception.hpp"
+#include <pjh_json/helpers/json_definition.hpp>
+#include <pjh_json/helpers/json_exception.hpp>
 
 namespace pjh_std
 {

@@ -3,11 +3,13 @@
 
 #include <algorithm>
 
-#include "json_definition.hpp"
-#include "json_exception.hpp"
-#include "json_element.hpp"
-#include "json_value.hpp"
-#include "object_pool.hpp"
+#include <pjh_json/helpers/json_definition.hpp>
+#include <pjh_json/helpers/json_exception.hpp>
+
+#include <pjh_json/datas/json_element.hpp>
+#include <pjh_json/datas/json_value.hpp>
+
+#include <pjh_json/utils/object_pool.hpp>
 
 namespace pjh_std
 {
@@ -227,6 +229,7 @@ namespace pjh_std
             void append(bool p_value) { append_raw_ptr(new Value(p_value)); }
             void append(int p_value) { append_raw_ptr(new Value(p_value)); }
             void append(float p_value) { append_raw_ptr(new Value(p_value)); }
+            void append(const char *p_value) { append_raw_ptr(new Value(string_t(p_value))); }
             void append(const string_t &p_value) { append_raw_ptr(new Value(p_value)); }
             void append(char *p_value) { append_raw_ptr(new Value(p_value)); }
 

@@ -4,9 +4,11 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include <variant>
+// #include <variant>
 #include <sstream>
 #include <string_view>
+// #include <utils/variant.hpp>
+#include <pjh_json/utils/variant.hpp>
 
 namespace pjh_std
 {
@@ -26,7 +28,7 @@ namespace pjh_std
         using string_v_t = std::string_view;
 
         // 使用 std::variant 定义 JSON 的值类型，它可以持有多种不同的基础数据类型
-        using value_t = std::variant<
+        using value_t = Variant<
             std::nullptr_t,
             bool,
             int,

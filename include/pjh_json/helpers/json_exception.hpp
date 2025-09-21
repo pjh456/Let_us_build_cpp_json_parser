@@ -3,7 +3,7 @@
 
 #include <stdexcept>
 
-#include "json_definition.hpp"
+#include <pjh_json/helpers/json_definition.hpp>
 
 namespace pjh_std
 {
