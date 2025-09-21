@@ -171,9 +171,6 @@ void test_parser()
     assert(profile["height"].as_float() == 1.75f);
     assert(profile["city"].as_str() == "New York");
 
-    // 6. 释放内存 (由于 Ref 内部使用裸指针，需要手动删除根元素)
-    delete root.get();
-
     std::cout << "Parser tests passed.\n";
 }
 
@@ -224,9 +221,6 @@ void test_factory_build()
     // 3. 输出 JSON 结构 (使用 pretty_serialize)
     std::cout << json;
 
-    // 4. 注意：这里没有手动调用 delete json.get()，因为工厂函数创建的 Element 应该由 Ref 的用户负责管理生命周期。
-    // 在这个简单的测试中，Ref 指针的生命周期跟随函数结束，但实际应用中需要谨慎管理。
-
     std::cout << "Factory build tests passed.\n";
 }
 
@@ -257,9 +251,6 @@ void test_file_io()
 
     // 5. 可以在这里添加断言来验证文件内容，但主要目的是测试性能
     // std::cout << root;
-
-    // 6. 释放内存
-    delete root.get();
 }
 
 void test_nlohhman_json_file_io()

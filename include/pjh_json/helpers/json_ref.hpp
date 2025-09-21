@@ -19,6 +19,7 @@ namespace pjh_std
          * @class Ref
          * @brief 一个 Element 指针的包装类，提供了类似智能指针的功能和便捷的链式访问语法。
          *        例如，可以使用 `json_ref["key"][0]` 的方式来访问嵌套的 JSON 数据。
+         * 它同时负责了指针的生命周期！
          */
         class Ref
         {
@@ -28,6 +29,47 @@ namespace pjh_std
         public:
             /// @brief 构造函数，可以接受一个 Element 指针。
             Ref(Element *p_ptr = nullptr) : m_ptr(p_ptr) {}
+            Ref(const Ref &other) : m_ptr(nullptr)
+            {
+                if (other.m_ptr->is_value())
+                    m_ptr = new Value(other.m_ptr->as_value());
+                else if (other.m_ptr->is_object())
+                    m_ptr = new Object(other.m_ptr->as_object());
+                else if (other.m_ptr->is_object())
+                    m_ptr = new Array(other.m_ptr->as_array());
+            }
+            Ref &operator=(const Ref &other)
+            {
+                if (this == &other)
+                    return *this;
+                if (m_ptr != nullptr)
+                    delete m_ptr;
+                if (other.m_ptr->is_value())
+                    m_ptr = new Value(other.m_ptr->as_value());
+                else if (other.m_ptr->is_object())
+                    m_ptr = new Object(other.m_ptr->as_object());
+                else if (other.m_ptr->is_object())
+                    m_ptr = new Array(other.m_ptr->as_array());
+                else
+                    m_ptr = nullptr;
+                return *this;
+            }
+            Ref(Ref &&other) noexcept
+                : m_ptr(other.m_ptr) { other.m_ptr = nullptr; }
+            Ref &operator=(Ref &&other) noexcept
+            {
+                if (this == &other)
+                    return *this;
+                m_ptr = other.m_ptr;
+                other.m_ptr = nullptr;
+                return *this;
+            }
+
+            ~Ref()
+            {
+                if (m_ptr != nullptr)
+                    delete m_ptr;
+            }
 
             /// @brief 重载 [] 运算符，用于访问 Object 的成员。
             Ref operator[](string_v_t p_key)

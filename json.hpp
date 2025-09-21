@@ -1184,6 +1184,8 @@ namespace pjh_std
             /// @brief 构造函数，可以接受一个 Element 指针。
             Ref(Element *p_ptr = nullptr) : m_ptr(p_ptr) {}
 
+            ~Ref() { delete m_ptr; }
+
             /// @brief 重载 [] 运算符，用于访问 Object 的成员。
             Ref operator[](string_v_t p_key)
             {
