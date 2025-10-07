@@ -123,7 +123,11 @@ namespace pjh_std
             /// @brief 跳过空白字符（空格、制表符、换行符）。
             inline void skip_white_space()
             {
-                while (!eof() && (peek_char() == '\n' || peek_char() == '\t' || peek_char() == ' '))
+                while (!eof() &&
+                       (peek_char() == '\n' ||
+                        peek_char() == '\t' ||
+                        peek_char() == '\r' ||
+                        peek_char() == ' '))
                 {
                     if (get_char() == '\n') // 如果是换行符，更新行号和列号
                         line++, column = 1;
