@@ -67,8 +67,6 @@ namespace pjh_std
 
             ~Ref()
             {
-                if (m_ptr != nullptr)
-                    delete m_ptr;
             }
 
             /// @brief 重载 [] 运算符，用于访问 Object 的成员。
