@@ -1221,8 +1221,6 @@ namespace pjh_std
 
             ~Ref()
             {
-                if (m_ptr != nullptr)
-                    delete m_ptr;
             }
 
             /// @brief 重载 [] 运算符，用于访问 Object 的成员。
@@ -1490,7 +1488,11 @@ namespace pjh_std
             /// @brief 跳过空白字符（空格、制表符、换行符）。
             inline void skip_white_space()
             {
-                while (!eof() && (peek_char() == '\n' || peek_char() == '\t' || peek_char() == ' '))
+                while (!eof() &&
+                       (peek_char() == '\n' ||
+                        peek_char() == '\t' ||
+                        peek_char() == '\r' ||
+                        peek_char() == ' '))
                 {
                     if (get_char() == '\n') // 如果是换行符，更新行号和列号
                         line++, column = 1;
@@ -1604,6 +1606,9 @@ namespace pjh_std
         /**
          * @class Parser
          * @brief 语法分析器，采用递归下降的方式将 Token 流解析成一棵由 Element 构成的 JSON 树。
+         *
+         * 注意！如果需要跨 Parser 生命周期使用解析的数据，必须避免 Parser 的析构！
+         * Parser 中保留有数据里 string_view 的原始指针！
          */
         class Parser
         {
