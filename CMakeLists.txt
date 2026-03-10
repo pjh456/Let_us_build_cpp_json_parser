@@ -11,19 +11,54 @@ set(BENCHMARK_ENABLE_INSTALL OFF)
 set(BENCHMARK_INSTALL_DOCS OFF)
 set(BENCHMARK_INSTALL_TOOLS OFF)
 
-add_subdirectory(include/nlohhman_json)
+if(MSVC)
+    add_compile_options(
+        /utf-8
+        /MP
+        /Zc:char8_t-
+    )
+
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+    add_compile_options(
+        $<$<CONFIG:Release>:/O2>
+        $<$<CONFIG:Release>:/GL>
+        $<$<CONFIG:Release>:/arch:AVX2>
+
+        $<$<CONFIG:RelWithDebInfo>:/O2>
+        $<$<CONFIG:RelWithDebInfo>:/GL>
+        $<$<CONFIG:RelWithDebInfo>:/arch:AVX2>
+    )
+    add_link_options(
+        $<$<CONFIG:Release>:/LTCG>
+        $<$<CONFIG:RelWithDebInfo>:/LTCG>
+    )
+else()
+    add_link_options(
+        -static-libgcc
+        -static-libstdc++
+        -static)
+
+    add_compile_options(
+        -O2
+        -march=native
+        -mtune=native
+        -flto=auto)
+endif()
+
+add_subdirectory(include/nlohmann_json)
 add_subdirectory(include/pjh_json)
 add_subdirectory(include/benchmark)
 
 add_executable(main test_json.cpp)
-target_include_directories(main PRIVATE include/rapid_json/include)
+target_include_directories(main PRIVATE include/rapidjson/include)
 target_link_libraries(main
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE pjh_json
 )
 
 add_executable(test_speed benchmark_test.cpp)
-target_include_directories(test_speed PRIVATE include/rapid_json/include)
+target_include_directories(test_speed PRIVATE include/rapidjson/include)
 target_link_libraries(test_speed
     PRIVATE benchmark::benchmark
     PRIVATE nlohmann_json::nlohmann_json

@@ -6,5 +6,3 @@ output.etl.EmbeddedPdbs
 output.etl.NGENPDB
 .vscode
 build
-include/nlohhman_json
-include/rapidjson
